@@ -1,0 +1,367 @@
+#!/usr/bin/env bash
+# macOS CLI for the shared HKUST(GZ) Connect engine.
+set -u
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)"
+ROOT="$(cd "$HERE/.." && pwd -P)"
+ENGINE_SOURCE_ROOT="$ROOT/engine"
+ENGINE_CONFIG="$ROOT/config/hkustgz.json"
+PAC_TEMPLATE="$HERE/campus-only.pac.template"
+
+case "$(uname -m)" in
+  arm64) ENGINE_ARCH="arm64" ;;
+  x86_64) ENGINE_ARCH="amd64" ;;
+  *) ENGINE_ARCH="$(uname -m)" ;;
+esac
+if [ -x "$ENGINE_SOURCE_ROOT/bin/ec-engine-darwin-$ENGINE_ARCH" ]; then
+  ENGINE="$ENGINE_SOURCE_ROOT/bin/ec-engine-darwin-$ENGINE_ARCH"
+elif [ -x "$ENGINE_SOURCE_ROOT/bin/ec-engine" ]; then
+  ENGINE="$ENGINE_SOURCE_ROOT/bin/ec-engine"
+else
+  ENGINE="$ENGINE_SOURCE_ROOT/target/release/ec-engine"
+fi
+
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}/hkustgz-connect"
+CONF="${HKUSTGZ_CONFIG:-$CONFIG_HOME/config.toml}"
+POLICY="${HKUSTGZ_POLICY:-$CONFIG_HOME/policy.json}"
+RUNDIR="$HOME/.hkustgzconnect"
+LOG="$RUNDIR/hkustgzconnect.log"
+PIDFILE="$RUNDIR/hkustgzconnect.pid"
+PAC_FILE="$RUNDIR/campus-only.pac"
+KEYCHAIN_SERVICE="hkustgzconnect"
+SOCKS_HOST="127.0.0.1"
+SOCKS_PORT="$(awk -F'[:\"]' '/^socks_bind/{print $(NF-1); exit}' "$CONF" 2>/dev/null)"
+SOCKS_PORT="${SOCKS_PORT:-1080}"
+LABEL="com.hkustgz.connect"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+FALLBACK_PORT="1081"
+CAMPUS_PROBE_URL="https://ssfas.hkust-gz.edu.cn/"
+
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+valid_port() {
+  [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1025 ] && [ "$1" -le 65535 ]
+}
+valid_port "$SOCKS_PORT" || die "SOCKS port must be within 1025..65535"
+
+mkdir -p "$RUNDIR"
+chmod 700 "$RUNDIR"
+touch "$LOG"
+chmod 600 "$LOG"
+
+ACC="$(awk -F'"' '/^username/{print $2; exit}' "$CONF" 2>/dev/null)"
+require_account() {
+  [ -f "$CONF" ] || die "identity is not configured; run: $(basename "$0") configure"
+  [ -n "$ACC" ] || die "username is missing from $CONF"
+}
+
+get_pw() { security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$ACC" -w 2>/dev/null; }
+socks_listening() { lsof -nP -iTCP@"$SOCKS_HOST":"$SOCKS_PORT" -sTCP:LISTEN >/dev/null 2>&1; }
+fallback_listening() { lsof -nP -iTCP@"$SOCKS_HOST":"$FALLBACK_PORT" -sTCP:LISTEN >/dev/null 2>&1; }
+listener_pids() { lsof -nP -t -iTCP@"$SOCKS_HOST":"$SOCKS_PORT" -sTCP:LISTEN 2>/dev/null; }
+listener_executable() {
+  local pid="$1"
+  lsof -a -p "$pid" -d txt -Fn 2>/dev/null | awk '/^n/{print substr($0,2); exit}'
+}
+shared_engine_listening() {
+  local pid executable name listeners=0 engines=0
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    listeners=$((listeners + 1))
+    executable="$(listener_executable "$pid")"
+    name="${executable##*/}"
+    case "$name" in ec-engine|ec-engine-*) engines=$((engines + 1)) ;; esac
+  done < <(listener_pids)
+  [ "$listeners" -eq 1 ] && [ "$engines" -eq 1 ]
+}
+owned_engine_pid() {
+  local pid executable
+  [ -f "$PIDFILE" ] || return 1
+  pid="$(awk 'NR==1 && /^[0-9]+$/{print; exit}' "$PIDFILE" 2>/dev/null)"
+  [ -n "$pid" ] || return 1
+  executable="$(listener_executable "$pid")"
+  [ "$executable" = "$ENGINE" ] || return 1
+  printf '%s\n' "$pid"
+}
+engine_process_running() { owned_engine_pid >/dev/null 2>&1; }
+svc_loaded() { launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; }
+
+probe_campus_http_code() {
+  curl -sS --proxy "socks5h://$SOCKS_HOST:$SOCKS_PORT" \
+    --connect-timeout 3 --max-time 6 -o /dev/null -w '%{http_code}' \
+    "$CAMPUS_PROBE_URL" 2>/dev/null
+}
+probe_data_plane() {
+  local http_code
+  http_code="$(probe_campus_http_code)"
+  if [ -n "$http_code" ] && [ "$http_code" != "000" ]; then
+    PROBE_SUMMARY="campus HTTPS $http_code"
+    return 0
+  fi
+  PROBE_SUMMARY=""
+  return 1
+}
+
+ensure_engine() {
+  [ -x "$ENGINE" ] && return 0
+  [ -f "$ENGINE_SOURCE_ROOT/Cargo.toml" ] || die "packaged engine is missing: $ENGINE"
+  if command -v cargo >/dev/null 2>&1; then
+    cargo_runner=(cargo)
+  elif command -v rustup >/dev/null 2>&1; then
+    toolchain_bin="$(dirname "$(rustup which rustc --toolchain 1.97.1)")"
+    cargo_runner=(env "PATH=$toolchain_bin:$PATH" rustup run 1.97.1 cargo)
+  else
+    die "engine is missing and cargo/rustup is unavailable"
+  fi
+  (cd "$ENGINE_SOURCE_ROOT" && LZMA_API_STATIC=1 "${cargo_runner[@]}" build --locked --release --bin ec-engine) \
+    || die "engine build failed"
+}
+write_pac() {
+  [ -f "$PAC_TEMPLATE" ] || die "PAC template is missing: $PAC_TEMPLATE"
+  local temporary="$PAC_FILE.$$.tmp" route_cidrs='[]'
+  if [ -f "$POLICY" ]; then
+    route_cidrs="$(plutil -extract route_ipv4_cidrs json -expect array -o - "$POLICY" 2>/dev/null)" \
+      || die "local network policy is invalid: $POLICY"
+  fi
+  sed -e "s/__SOCKS_PORT__/$SOCKS_PORT/g" -e "s|__ROUTE_IPV4_CIDRS__|$route_cidrs|g" "$PAC_TEMPLATE" > "$temporary" \
+    || { [ -f "$temporary" ] && mv "$temporary" "$temporary.failed"; die "cannot generate PAC"; }
+  chmod 600 "$temporary"
+  mv "$temporary" "$PAC_FILE"
+}
+rotate_log() {
+  [ -s "$LOG" ] && cp -p "$LOG" "$LOG.previous"
+  : > "$LOG"
+  chmod 600 "$LOG"
+}
+wait_socks() {
+  for _ in $(seq 1 20); do
+    shared_engine_listening && return 0
+    grep -qiE "authentication failed|unsupported|ec-engine:" "$LOG" 2>/dev/null && return 1
+    sleep 1
+  done
+  shared_engine_listening
+}
+report_up() {
+  if ! shared_engine_listening; then
+    printf 'failed to start; last log lines:\n' >&2
+    tail -8 "$LOG" 2>/dev/null | sed 's/^/  /' >&2
+    return 1
+  fi
+  if probe_data_plane; then
+    printf 'running: SOCKS5 %s:%s (campus data path healthy)\n' "$SOCKS_HOST" "$SOCKS_PORT"
+    printf 'probe: %s\n' "$PROBE_SUMMARY"
+  else
+    printf 'starting: SOCKS5 %s:%s (campus probe pending)\n' "$SOCKS_HOST" "$SOCKS_PORT"
+  fi
+  printf 'PAC: file://%s\n' "$PAC_FILE"
+}
+run_engine() {
+  local pw engine_pid
+  local -a engine_args
+  pw="$(get_pw)" || true
+  [ -n "${pw:-}" ] || die "no password in Keychain; run: $(basename "$0") set-password"
+  engine_args=(--config "$ENGINE_CONFIG" --credentials-stdin --socks-bind "$SOCKS_HOST:$SOCKS_PORT")
+  [ -f "$POLICY" ] && engine_args+=(--local-policy "$POLICY")
+  {
+    printf '%s\n' "$ACC"
+    printf '%s\n' "$pw"
+  } | "$ENGINE" "${engine_args[@]}" &
+  engine_pid=$!
+  printf '%s\n' "$engine_pid" > "$PIDFILE"
+  chmod 600 "$PIDFILE"
+  wait "$engine_pid"
+}
+
+case "${1:-}" in
+  configure)
+    username="${2:-}"
+    port="${3:-1080}"
+    if [ -z "$username" ]; then read -r -p "Campus username: " username; fi
+    [[ "$username" =~ ^[A-Za-z0-9._@-]+$ ]] || die "username contains unsupported characters"
+    valid_port "$port" || die "SOCKS port must be within 1025..65535"
+    mkdir -p "$(dirname "$CONF")"
+    chmod 700 "$(dirname "$CONF")"
+    printf 'username = "%s"\nsocks_bind = "127.0.0.1:%s"\n' "$username" "$port" > "$CONF"
+    chmod 600 "$CONF"
+    printf 'configuration saved to %s\n' "$CONF"
+    ;;
+
+  set-password)
+    require_account
+    printf 'Password for %s at the HKUST(GZ) gateway (macOS will prompt twice):\n' "$ACC" >&2
+    security add-generic-password -U -s "$KEYCHAIN_SERVICE" -a "$ACC" -w \
+      && printf 'password stored in macOS Keychain\n' \
+      || die "password was not stored"
+    ;;
+
+  set-policy)
+    source_policy="${2:-}"
+    [ -n "$source_policy" ] || die "usage: $(basename "$0") set-policy FILE"
+    [ -f "$source_policy" ] || die "network policy file does not exist: $source_policy"
+    version="$(plutil -extract version raw -expect integer -o - "$source_policy" 2>/dev/null)" \
+      || die "network policy must contain integer version 1"
+    [ "$version" = "1" ] || die "network policy version must be 1"
+    plutil -extract vpn_dns_servers raw -expect array -o - "$source_policy" >/dev/null 2>&1 \
+      || die "network policy must contain a vpn_dns_servers array"
+    plutil -extract route_ipv4_cidrs raw -expect array -o - "$source_policy" >/dev/null 2>&1 \
+      || die "network policy must contain a route_ipv4_cidrs array"
+    mkdir -p "$CONFIG_HOME"
+    chmod 700 "$CONFIG_HOME"
+    temporary="$POLICY.$$.tmp"
+    cp "$source_policy" "$temporary" || die "cannot copy network policy"
+    chmod 600 "$temporary"
+    mv "$temporary" "$POLICY"
+    printf 'local network policy installed at %s\n' "$POLICY"
+    printf 'restart the owning interface to apply it\n'
+    ;;
+
+  run)
+    if shared_engine_listening && probe_data_plane; then exit 0; fi
+    socks_listening && die "SOCKS5 $SOCKS_HOST:$SOCKS_PORT is occupied by another process"
+    require_account
+    ensure_engine
+    run_engine
+    ;;
+
+  up)
+    if socks_listening; then
+      shared_engine_listening || die "SOCKS5 $SOCKS_HOST:$SOCKS_PORT is occupied by another process"
+      if probe_data_plane; then
+        printf 'attached: shared campus engine is healthy on %s:%s\n' "$SOCKS_HOST" "$SOCKS_PORT"
+        printf 'probe: %s\n' "$PROBE_SUMMARY"
+        exit 0
+      fi
+      if engine_process_running; then
+        printf 'owned engine is unhealthy; restarting it\n' >&2
+        "$0" down >/dev/null 2>&1
+        sleep 1
+      else
+        die "a shared engine owns port $SOCKS_PORT but its campus data path is unhealthy; stop it from its owning interface"
+      fi
+    fi
+    require_account
+    ensure_engine
+    [ -f "$ENGINE_CONFIG" ] || die "engine profile is missing: $ENGINE_CONFIG"
+    write_pac
+    get_pw >/dev/null 2>&1 || die "no password in Keychain; run set-password"
+    rotate_log
+    if [ -f "$PLIST" ]; then
+      launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null \
+        || launchctl kickstart "gui/$(id -u)/$LABEL" 2>/dev/null
+    else
+      nohup "$0" run >>"$LOG" 2>&1 &
+      disown 2>/dev/null || true
+    fi
+    wait_socks
+    report_up || { "$0" down >/dev/null 2>&1; exit 1; }
+    ;;
+
+  down)
+    svc_loaded && launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
+    pid="$(owned_engine_pid 2>/dev/null)" || true
+    if [ -n "${pid:-}" ]; then kill "$pid" 2>/dev/null || true; fi
+    [ -f "$PIDFILE" ] && mv "$PIDFILE" "$RUNDIR/hkustgzconnect.pid.stopped"
+    sleep 1
+    if shared_engine_listening; then
+      printf 'detached: a shared engine owned by another interface remains running\n'
+    else
+      printf 'stopped: no CLI-owned engine is running\n'
+    fi
+    ;;
+
+  restart)
+    "$0" down >/dev/null 2>&1
+    sleep 1
+    exec "$0" up
+    ;;
+
+  status)
+    if shared_engine_listening; then
+      if probe_data_plane; then
+        printf 'running (campus data path healthy)\n'
+      else
+        printf 'degraded (listener present; campus probe failed or engine is reconnecting)\n'
+      fi
+      printf 'SOCKS5 %s:%s: shared engine\n' "$SOCKS_HOST" "$SOCKS_PORT"
+      owned_engine_pid >/dev/null 2>&1 && printf 'ownership: this CLI\n' || printf 'ownership: another interface\n'
+      [ -n "$PROBE_SUMMARY" ] && printf 'probe: %s\n' "$PROBE_SUMMARY"
+    elif socks_listening; then
+      printf 'blocked: SOCKS5 %s:%s is occupied by another process\n' "$SOCKS_HOST" "$SOCKS_PORT"
+    elif engine_process_running; then
+      printf 'reconnecting: CLI-owned engine process is running without a listener\n'
+    else
+      printf 'stopped: no shared engine is listening\n'
+    fi
+    [ -n "$ACC" ] && printf 'identity: configured\n' || printf 'identity: not configured\n'
+    if [ -n "$ACC" ] && get_pw >/dev/null 2>&1; then printf 'Keychain password: present\n'; else printf 'Keychain password: missing\n'; fi
+    [ -x "$ENGINE" ] && printf 'engine: available\n' || printf 'engine: not built\n'
+    [ -f "$POLICY" ] && printf 'local network policy: present\n' || printf 'local network policy: not installed (public domains only)\n'
+    fallback_listening && printf 'Shadowrocket relay: %s:%s\n' "$SOCKS_HOST" "$FALLBACK_PORT" || printf 'Shadowrocket relay: not running\n'
+    ;;
+
+  test)
+    shared_engine_listening || die "shared campus engine is not listening on $SOCKS_HOST:$SOCKS_PORT"
+    probe_data_plane || die "campus data path probe failed"
+    printf '%s\n' "$PROBE_SUMMARY"
+    ;;
+
+  pac)
+    write_pac
+    printf 'file://%s\n' "$PAC_FILE"
+    ;;
+
+  install)
+    require_account
+    ensure_engine
+    get_pw >/dev/null 2>&1 || die "set the password first"
+    mkdir -p "$(dirname "$PLIST")"
+    printf '%s\n' \
+      '<?xml version="1.0" encoding="UTF-8"?>' \
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+      '<plist version="1.0"><dict>' \
+      "<key>Label</key><string>$LABEL</string>" \
+      '<key>ProgramArguments</key><array>' \
+      "<string>$HERE/hkustgzconnect</string><string>run</string>" \
+      '</array>' \
+      '<key>RunAtLoad</key><true/>' \
+      '<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>' \
+      '<key>ThrottleInterval</key><integer>15</integer>' \
+      "<key>StandardOutPath</key><string>$LOG</string>" \
+      "<key>StandardErrorPath</key><string>$LOG</string>" \
+      '</dict></plist>' > "$PLIST"
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null \
+      || launchctl load "$PLIST" 2>/dev/null \
+      || die "could not load the LaunchAgent"
+    printf 'CLI autostart installed; the UI will attach to this shared engine\n'
+    ;;
+
+  uninstall)
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null \
+      || launchctl unload "$PLIST" 2>/dev/null \
+      || true
+    [ -f "$PLIST" ] && mv "$PLIST" "$RUNDIR/com.hkustgz.connect.plist.uninstalled"
+    printf 'CLI autostart removed\n'
+    ;;
+
+  logs)
+    tail -n 40 -f "$LOG"
+    ;;
+
+  *)
+    printf '%s\n' \
+      'HKUST(GZ) Connect CLI' \
+      '' \
+      '  configure [username] [port]  create private local configuration' \
+      '  set-password                 store the password in macOS Keychain' \
+      '  set-policy FILE              install a private local network policy' \
+      '  up                           start or attach to the shared engine' \
+      '  down                         stop only the engine this CLI owns' \
+      '  restart                      restart this CLI owner, then attach/start' \
+      '  status                       verify listener ownership and campus access' \
+      '  test                         run the approved campus data-path probe' \
+      '  pac                          generate the campus-only PAC file' \
+      '  logs                         follow CLI-owned engine logs' \
+      '  install                      install CLI launch-at-login ownership' \
+      '  uninstall                    remove CLI launch-at-login ownership'
+    ;;
+esac

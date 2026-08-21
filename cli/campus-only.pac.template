@@ -1,0 +1,56 @@
+'use strict';
+
+var ROUTE_DOMAINS = [
+  'hkust-gz.edu.cn',
+  'hkust.edu.hk'
+];
+var ROUTE_IPV4_CIDRS = __ROUTE_IPV4_CIDRS__;
+var VPN_GATEWAY = 'remote.hkust-gz.edu.cn';
+
+function ipv4Number(host) {
+  var octets = host.split('.');
+  if (octets.length !== 4) return null;
+  var result = 0;
+  for (var i = 0; i < octets.length; i++) {
+    var value = Number(octets[i]);
+    if (octets[i] === '' ||
+        octets[i].length > 3 ||
+        !isFinite(value) ||
+        Math.floor(value) !== value ||
+        value < 0 ||
+        value > 255 ||
+        String(value) !== octets[i]) return null;
+    result = (result * 256 + value) >>> 0;
+  }
+  return result;
+}
+
+function isRoutedIPv4(host) {
+  var address = ipv4Number(host);
+  if (address === null) return false;
+  for (var i = 0; i < ROUTE_IPV4_CIDRS.length; i++) {
+    var parts = ROUTE_IPV4_CIDRS[i].split('/');
+    var network = ipv4Number(parts[0]);
+    var prefix = Number(parts[1]);
+    if (network === null || prefix < 1 || prefix > 32) continue;
+    var mask = prefix === 32 ? 4294967295 : (4294967295 << (32 - prefix)) >>> 0;
+    if (((address & mask) >>> 0) === ((network & mask) >>> 0)) return true;
+  }
+  return false;
+}
+
+function FindProxyForURL(url, host) {
+  host = String(host || '').toLowerCase().replace(/\.$/, '');
+  // The outer VPN connection must never be sent back into its own SOCKS proxy.
+  if (host === VPN_GATEWAY) return 'DIRECT';
+  if (isRoutedIPv4(host)) return 'SOCKS5 127.0.0.1:__SOCKS_PORT__';
+  for (var i = 0; i < ROUTE_DOMAINS.length; i++) {
+    var domain = ROUTE_DOMAINS[i];
+    if (host === domain ||
+        (host.length > domain.length &&
+         host.slice(-(domain.length + 1)) === '.' + domain)) {
+      return 'SOCKS5 127.0.0.1:__SOCKS_PORT__';
+    }
+  }
+  return 'DIRECT';
+}

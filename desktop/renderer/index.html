@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self';">
+  <title>HKUST(GZ) Connect</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-overview" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-access" viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M4 9h16M8 5v4"/><path d="m10 15 2-2 2 2m-2-2v5"/></symbol>
+    <symbol id="i-diagnostics" viewBox="0 0 24 24"><path d="M3 12h4l2-6 4 12 2-6h6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.5 1A7 7 0 0 0 15 6l-.4-2.7h-4L10 6a7 7 0 0 0-1.5 1L6 6 4 9.5 6.1 11a7 7 0 0 0 0 2L4 14.5 6 18l2.5-1a7 7 0 0 0 1.5 1l.5 2.7h4L15 18a7 7 0 0 0 1.5-1l2.5 1 2-3.5-2.1-1.5a7 7 0 0 0 .1-1z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19z"/><path d="M12 9v4m0 3h.01"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-stethoscope" viewBox="0 0 24 24"><path d="M6 3v5a4 4 0 0 0 8 0V3M4 3h4m4 0h4"/><path d="M10 12v2a5 5 0 0 0 10 0v-1"/><circle cx="20" cy="10" r="2"/></symbol>
+    <symbol id="i-restart" viewBox="0 0 24 24"><path d="M20 7v5h-5"/><path d="M19 12a7 7 0 1 0-2 5"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v6H5V6h6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M19 12a7 7 0 0 0-12-5L4 10m1 2a7 7 0 0 0 12 5l3-3"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></symbol>
+    <symbol id="i-browser" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M7 6h.01M10 6h.01"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="i-log-out" viewBox="0 0 24 24"><path d="M10 4H4v16h6M14 8l4 4-4 4m4-4H8"/></symbol>
+  </svg>
+
+  <div class="titlebar" aria-hidden="true"></div>
+
+  <section id="login" class="login" hidden>
+    <img class="login-logo" src="../assets/logo.svg" alt="HKUST(GZ)">
+    <h1>HKUST(GZ) Connect</h1>
+    <p>Secure access to authorized campus resources</p>
+    <form id="loginForm" class="login-form">
+      <label for="loginUsername">Campus account</label>
+      <input id="loginUsername" class="input" type="text" autocomplete="username" spellcheck="false">
+      <label for="loginPassword">Password</label>
+      <input id="loginPassword" class="input" type="password" autocomplete="current-password">
+      <button id="loginButton" class="button primary wide" type="submit">Save and connect</button>
+      <p class="form-note">Your password is stored in macOS Keychain or Windows secure storage.</p>
+      <p id="loginError" class="form-message error" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="appShell" class="app-shell" hidden>
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="../assets/logo.svg" alt="">
+        <span>HKUST(GZ)<small>Connect</small></span>
+      </div>
+      <nav class="navigation" aria-label="Application">
+        <button class="nav-item active" type="button" data-page="overview" aria-current="page" title="Overview">
+          <svg><use href="#i-overview"></use></svg><span>Overview</span>
+        </button>
+        <button class="nav-item" type="button" data-page="access" title="Access">
+          <svg><use href="#i-access"></use></svg><span>Access</span>
+        </button>
+        <button class="nav-item" type="button" data-page="diagnostics" title="Diagnostics">
+          <svg><use href="#i-diagnostics"></use></svg><span>Diagnostics</span>
+        </button>
+        <button class="nav-item" type="button" data-page="settings" title="Settings">
+          <svg><use href="#i-settings"></use></svg><span>Settings</span>
+        </button>
+      </nav>
+      <div class="sidebar-footer"><strong id="sidebarAccount">-</strong><span id="sidebarVersion">-</span></div>
+    </aside>
+
+    <main class="main">
+      <header class="app-header">
+        <h1 id="pageTitle">Overview</h1>
+        <div id="globalState" class="global-state neutral"><span class="status-dot"></span><span id="globalStateLabel">Disconnected</span></div>
+      </header>
+
+      <div class="page-scroll">
+        <section class="page active" data-page-panel="overview">
+          <div id="connectionBand" class="connection-band neutral">
+            <div class="connection-copy">
+              <h2 id="connectionTitle">Campus access is disconnected</h2>
+              <p id="connectionDetail">No campus tunnel is running.</p>
+              <p id="connectionError" class="inline-error" role="alert"></p>
+            </div>
+            <div class="connection-actions">
+              <button class="icon-button diagnostics-trigger" type="button" aria-label="Run checks" title="Run checks"><svg><use href="#i-stethoscope"></use></svg></button>
+              <button class="icon-button restart-trigger" type="button" aria-label="Restart tunnel" title="Restart tunnel"><svg><use href="#i-restart"></use></svg></button>
+              <button id="connectionButton" class="button primary" type="button">Connect</button>
+            </div>
+          </div>
+
+          <section class="section">
+            <div class="section-heading"><h2>Connection</h2></div>
+            <div class="facts">
+              <div class="fact"><span>Tunnel</span><strong id="tunnelFact"><i class="fact-dot"></i>Stopped</strong></div>
+              <div class="fact"><span>Campus path</span><strong id="pathFact"><i class="fact-dot"></i>Not checked</strong></div>
+              <div class="fact"><span>SOCKS5</span><strong><code id="socksFact">127.0.0.1:1080</code></strong></div>
+              <div class="fact"><span>Active use</span><strong id="usageFact">0 connections</strong></div>
+            </div>
+          </section>
+
+          <section class="section">
+            <div class="section-heading"><h2>Quick access</h2><button class="text-button" type="button" data-go-page="access">View all access options</button></div>
+            <div class="overview-grid">
+              <div class="panel quick-access">
+                <div class="url-row">
+                  <input id="overviewUrl" class="input" type="url" inputmode="url" spellcheck="false" placeholder="Enter a campus URL">
+                  <button class="button primary open-campus" type="button" data-url-input="overviewUrl">Open</button>
+                </div>
+                <div id="overviewResources" class="resource-list"></div>
+                <p id="overviewOpenMessage" class="form-message" role="status"></p>
+              </div>
+              <div class="panel activity-panel">
+                <h3>Current session</h3>
+                <div id="activityList" class="activity-list"></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="appsSection" class="section" hidden>
+            <div class="section-heading"><h2>Applications using the tunnel</h2></div>
+            <div id="appsList" class="app-list panel"></div>
+          </section>
+        </section>
+
+        <section class="page" data-page-panel="access" hidden>
+          <p class="page-intro">Open university resources in the isolated campus browser or connect approved external applications.</p>
+          <section class="section first">
+            <div class="section-heading"><h2>Campus Browser</h2><span class="security-label"><svg><use href="#i-shield"></use></svg>Isolated tunnel</span></div>
+            <div class="panel access-panel">
+              <div class="url-row">
+                <input id="accessUrl" class="input" type="url" inputmode="url" spellcheck="false" placeholder="Enter a campus URL">
+                <button class="button primary open-campus" type="button" data-url-input="accessUrl">Open</button>
+              </div>
+              <div id="accessResources" class="resource-list columns"></div>
+              <p id="accessOpenMessage" class="form-message" role="status"></p>
+            </div>
+          </section>
+          <section class="section">
+            <div class="section-heading"><h2>External applications</h2></div>
+            <div class="tool-list">
+              <div class="tool-row"><div><strong>SOCKS5 endpoint</strong><code id="socksEndpoint">127.0.0.1:1080</code></div><button class="icon-button copy-trigger" type="button" data-copy="socks" aria-label="Copy SOCKS5 endpoint" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
+              <div class="tool-row"><div><strong>PAC URL</strong><code id="pacEndpoint">-</code></div><button class="icon-button copy-trigger" type="button" data-copy="pac" aria-label="Copy PAC URL" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
+              <div class="tool-row"><div><strong>SSH ProxyCommand</strong><code id="sshEndpoint">Load the generated snippet</code></div><button class="icon-button copy-trigger" type="button" data-copy="ssh" aria-label="Copy SSH ProxyCommand" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
+            </div>
+            <p id="copyMessage" class="form-message" role="status"></p>
+          </section>
+        </section>
+
+        <section class="page" data-page-panel="diagnostics" hidden>
+          <p class="page-intro">Checks distinguish the local process, proxy listener, campus data path, gateway, and optional Shadowrocket relay.</p>
+          <section class="section first">
+            <div class="section-heading"><div><h2>Health checks</h2><p id="diagnosticsMeta" class="section-note">Not run in this session</p></div><button id="runDiagnosticsButton" class="button secondary diagnostics-trigger" type="button"><svg><use href="#i-stethoscope"></use></svg>Run checks</button></div>
+            <div id="diagnosticsList" class="diagnostics-list panel"></div>
+          </section>
+          <section class="section">
+            <div class="section-heading"><h2>Recovery</h2></div>
+            <div class="recovery-row">
+              <div><strong>Restart the owned tunnel process</strong><p>Use this after a sustained campus-path failure. External applications will reconnect.</p></div>
+              <button class="button secondary restart-trigger" type="button"><svg><use href="#i-restart"></use></svg>Restart tunnel</button>
+            </div>
+            <p id="recoveryMessage" class="form-message" role="status"></p>
+          </section>
+          <section class="section logs-section">
+            <div class="section-heading"><h2>Sanitized logs</h2><div class="icon-actions"><button id="refreshLogs" class="icon-button" type="button" aria-label="Refresh logs" title="Refresh"><svg><use href="#i-refresh"></use></svg></button><button id="copyLogs" class="icon-button" type="button" aria-label="Copy logs" title="Copy"><svg><use href="#i-copy"></use></svg></button><button id="revealLog" class="icon-button" type="button" aria-label="Reveal log file" title="Reveal log file"><svg><use href="#i-folder"></use></svg></button></div></div>
+            <pre id="logs" class="logs">No logs yet.</pre>
+          </section>
+        </section>
+
+        <section class="page settings-page" data-page-panel="settings" hidden>
+          <p class="page-intro">Changes apply to this desktop app and the tunnel process it owns.</p>
+          <form id="settingsForm" class="settings-stack">
+            <section class="settings-group">
+              <h2>Account</h2>
+              <label class="setting-row"><span>Username</span><input id="settingsUsername" class="input" type="text" autocomplete="username" spellcheck="false"></label>
+              <label class="setting-row"><span>Password<small>Leave blank to keep the current secure value.</small></span><input id="settingsPassword" class="input" type="password" autocomplete="new-password" placeholder="Replace password"></label>
+            </section>
+            <section class="settings-group">
+              <h2>Lifecycle</h2>
+              <label class="setting-row"><span>Start app at login<small>Starts this desktop app, not the separate CLI LaunchAgent.</small></span><input id="startAtLogin" class="toggle" type="checkbox"></label>
+              <label class="setting-row"><span>Connect when app starts</span><input id="autoConnect" class="toggle" type="checkbox"></label>
+              <label class="setting-row"><span>Automatically reconnect</span><input id="autoReconnect" class="toggle" type="checkbox"></label>
+              <label class="setting-row"><span>Retry limit</span><input id="maxAttempts" class="input compact" type="number" min="0" max="10"></label>
+              <label class="setting-row"><span>When closing the window</span><select id="closeAction" class="input compact"><option value="ask">Ask every time</option><option value="minimize">Keep running in menu bar</option><option value="quit">Quit application</option></select></label>
+            </section>
+            <section class="settings-group">
+              <h2>Network endpoint</h2>
+              <label class="setting-row"><span>Bind address<small>Loopback-only by design.</small></span><input class="input compact" value="127.0.0.1" disabled></label>
+              <label class="setting-row"><span>SOCKS port<small>Changing this reconnects the tunnel and regenerates PAC.</small></span><input id="settingsPort" class="input compact" type="number" min="1025" max="65535"></label>
+            </section>
+            <details class="settings-group advanced-settings">
+              <summary>Advanced route policy</summary>
+              <label class="advanced-body" for="routeDomains"><span>Authorized domain suffixes<small>One reviewed university-owned suffix per line.</small></span><textarea id="routeDomains" class="input" rows="5" spellcheck="false"></textarea></label>
+              <label class="advanced-body" for="routeIpv4Cidrs"><span>Private IPv4 routes<small>Local-only values supplied through an approved campus source, one CIDR per line.</small></span><textarea id="routeIpv4Cidrs" class="input" rows="4" spellcheck="false" placeholder="No private routes configured"></textarea></label>
+              <label class="advanced-body" for="vpnDnsServers"><span>VPN DNS servers<small>Local-only addresses, one IPv4 address per line.</small></span><textarea id="vpnDnsServers" class="input" rows="3" spellcheck="false" placeholder="No VPN DNS servers configured"></textarea></label>
+            </details>
+            <div class="settings-actions"><button id="forgetAccount" class="button danger" type="button"><svg><use href="#i-log-out"></use></svg>Forget account</button><span class="actions-spacer"></span><button id="discardSettings" class="button secondary" type="button">Discard</button><button id="saveSettings" class="button primary" type="submit">Save changes</button></div>
+            <p id="settingsMessage" class="form-message" role="status"></p>
+          </form>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="confirmDialog" class="confirm-dialog">
+    <form method="dialog">
+      <h2>Forget this account?</h2>
+      <p>This disconnects the tunnel and removes the saved VPN password from secure storage.</p>
+      <div><button class="button secondary" value="cancel">Cancel</button><button class="button danger" value="confirm">Forget account</button></div>
+    </form>
+  </dialog>
+
+  <script src="../lib/presentation-state.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

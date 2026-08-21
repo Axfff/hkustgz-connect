@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y liblzma-dev
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt,clippy
+      - name: Format
+        run: cargo +1.97.1 fmt --manifest-path engine/Cargo.toml --all -- --check
+      - name: Lint
+        run: cargo +1.97.1 clippy --locked --manifest-path engine/Cargo.toml --all-targets -- -D warnings
+      - name: Test
+        run: cargo +1.97.1 test --locked --manifest-path engine/Cargo.toml
+
+  desktop-and-public:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm --prefix desktop ci
+      - run: npm --prefix desktop test
+      - run: npm --prefix desktop audit --audit-level=high
+      - run: bash -n cli/hkustgzconnect
+      - run: bash scripts/check-public.sh

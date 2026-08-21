@@ -1,0 +1,32 @@
+# Rust
+/engine/target/
+/engine/artifacts/
+/engine/captures/
+/engine/snapshots/live/
+/engine/diffs/live/
+
+# Electron
+/desktop/node_modules/
+/desktop/release/
+/desktop/engine/ec-engine-*
+/desktop/engine/hkustgz.json
+/desktop/build/icon.iconset/
+
+# Release output
+/dist/
+
+# Local identity and runtime state
+config.toml
+policy.json
+*.log
+*.pid
+*.pac
+cred.bin
+settings.json
+campus-credentials.json
+
+# Editors and macOS
+.DS_Store
+.idea/
+.vscode/
+*.swp

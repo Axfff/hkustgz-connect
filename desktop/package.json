@@ -1,0 +1,85 @@
+{
+  "name": "hkustgzconnect",
+  "version": "1.1.0",
+  "description": "HKUST(GZ) EasyConnect-compatible client with an independent Rust engine",
+  "main": "main.js",
+  "author": "HKUST(GZ) Connect contributors",
+  "license": "GPL-3.0-only",
+  "homepage": "https://github.com/Axfff/hkustgz-connect",
+  "repository": "github:Axfff/hkustgz-connect",
+  "scripts": {
+    "test": "node --test",
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:mac:app": "electron-builder --mac dir --arm64",
+    "dist:win": "electron-builder --win --x64",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "@electron/asar": "^3.4.1",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "overrides": {
+    "brace-expansion": "5.0.9",
+    "fast-uri": "3.1.5",
+    "js-yaml": "4.3.1"
+  },
+  "build": {
+    "appId": "io.github.axfff.hkustgz-connect",
+    "productName": "HKUST(GZ) Connect",
+    "artifactName": "hkustgzconnect-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "afterPack": "build/afterPack.js",
+    "files": [
+      "main.js",
+      "preload.js",
+      "campus-preload.js",
+      "lib/**/*",
+      "renderer/**/*",
+      "assets/**/*",
+      "build/icon.ico",
+      "build/icon.icns",
+      "build/icon.png",
+      "build/trayTemplate.png"
+    ],
+    "extraResources": [
+      {
+        "from": "engine",
+        "to": "engine",
+        "filter": ["ec-engine-*", "ec-engine.exe", "hkustgz.json"]
+      }
+    ],
+    "mac": {
+      "icon": "build/icon.png",
+      "target": [
+        { "target": "zip", "arch": ["arm64", "x64"] },
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ],
+      "category": "public.app-category.utilities",
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "dmg": {
+      "title": "HKUST(GZ) Connect ${version}"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Network"
+    }
+  }
+}
