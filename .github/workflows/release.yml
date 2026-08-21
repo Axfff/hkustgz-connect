@@ -33,7 +33,12 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "$GITHUB_REF_NAME" dist/*
-          --title "HKUST(GZ) Connect ${GITHUB_REF_NAME#v}"
-          --generate-notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/hkustgzconnect-$version-mac-arm64.dmg" \
+            "dist/hkustgzconnect-$version-mac-arm64.zip" \
+            "dist/hkustgz-connect-cli-$version-macos-arm64.tar.gz" \
+            dist/SHA256SUMS.txt \
+            --title "HKUST(GZ) Connect $version" \
+            --generate-notes
