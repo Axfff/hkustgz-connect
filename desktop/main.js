@@ -9,7 +9,7 @@ const { pathToFileURL } = require('url');
 const { spawn } = require('child_process');
 const { loadSettings: readSettings, saveSettings: writeSettings } = require('./lib/settings-store');
 const { applySettingsPatch } = require('./lib/settings-update');
-const { loadPassword: readPassword, savePassword: writePassword } = require('./lib/credential-store');
+const { PasswordSession } = require('./lib/credential-store');
 const { classifyEngineOutput, engineLifecycleSignal } = require('./lib/engine-output');
 const { buildPac } = require('./lib/pac');
 const {
@@ -49,6 +49,11 @@ const CAMPUS_CREDENTIALS = path.join(DATA, 'campus-credentials.json');
 const SHARED_CONFIG_HOME = process.env.XDG_CONFIG_HOME || path.join(app.getPath('home'), '.config');
 const POLICY = path.join(SHARED_CONFIG_HOME, 'hkustgz-connect', 'policy.json');
 const GATEWAY_HOST = 'remote.hkust-gz.edu.cn';
+const passwordSession = new PasswordSession({
+  file: CRED,
+  safeStorage,
+  platform: process.platform,
+});
 
 for (const privateFile of [SETTINGS, CRED, LOG, PAC_FILE, CAMPUS_CREDENTIALS, POLICY]) {
   ensureOwnerOnly(privateFile);
@@ -85,13 +90,13 @@ function loadSettings() {
   return readSettings(SETTINGS);
 }
 function saveSettings(settings) { return writeSettings(SETTINGS, settings); }
-function savePassword(pw) {
-  return writePassword(CRED, pw, safeStorage, process.platform);
+async function savePassword(pw) {
+  return passwordSession.save(pw);
 }
-function loadPassword() {
-  return readPassword(CRED, safeStorage, process.platform);
+async function loadPassword() {
+  return passwordSession.load();
 }
-function hasPassword() { return !!loadPassword(); }  // true only if it actually decrypts
+function hasPassword() { return passwordSession.hasStored(); }
 function socksPort() { return Number(loadSettings().port) || 1080; }
 function loadPolicy() {
   try { return loadNetworkPolicy(POLICY); }
@@ -197,7 +202,7 @@ async function connectOnce(isRetry) {
     emit();
     return;
   }
-  const pw = loadPassword();
+  const pw = await loadPassword();
   if (!s.username || !pw) { state.connecting = false; state.lastError = '请先填写账号和密码'; emit(); return; }
   const bin = enginePath();
   if (!fs.existsSync(bin)) { state.connecting = false; state.lastError = '引擎缺失:' + bin; emit(); return; }
@@ -694,13 +699,16 @@ async function connectAndOpenCampusBrowser(rawUrl) {
 }
 
 // ---------- IPC ----------
-ipcMain.handle('get-state', () => ({
-  ...publicRuntimeState(), settings: { ...loadSettings(), ...loadPolicy() },
-  hasPassword: hasPassword(), pacUrl: pacUrl(),
-  loggedIn: (hasPassword() && !!loadSettings().username) || !!externalEnginePid,
-  platform: process.platform,
-  version: app.getVersion(), campusResources: loadCampusResources(), telemetry: lastTele,
-}));
+ipcMain.handle('get-state', () => {
+  const passwordPresent = hasPassword();
+  return {
+    ...publicRuntimeState(), settings: { ...loadSettings(), ...loadPolicy() },
+    hasPassword: passwordPresent, pacUrl: pacUrl(),
+    loggedIn: (passwordPresent && !!loadSettings().username) || !!externalEnginePid,
+    platform: process.platform,
+    version: app.getVersion(), campusResources: loadCampusResources(), telemetry: lastTele,
+  };
+});
 ipcMain.handle('save', async (_e, p) => {
   const previous = loadSettings();
   let next;
@@ -734,7 +742,7 @@ ipcMain.handle('save', async (_e, p) => {
   } catch (error) {
     pacError = `设置已保存，但 PAC 文件写入失败：${error.message}`;
   }
-  if (p && typeof p.password === 'string' && p.password.length && !savePassword(p.password)) {
+  if (p && typeof p.password === 'string' && p.password.length && !await savePassword(p.password)) {
     return { ok: false, error: '系统安全存储不可用，密码未保存' };
   }
   if (p && typeof p.startAtLogin === 'boolean') { try { app.setLoginItemSettings({ openAtLogin: p.startAtLogin }); } catch {} }
@@ -781,7 +789,7 @@ ipcMain.handle('ssh-config', () => {
 });
 ipcMain.handle('logout', () => {
   disconnect();
-  try { fs.unlinkSync(CRED); } catch {}
+  passwordSession.forget();
   return { ok: true };
 });
 ipcMain.handle('get-logs', () => {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.5 - 2026-08-23
+
+- Coalesced concurrent startup credential reads into one asynchronous macOS
+  Keychain request and retained the result only for the app process lifetime.
+- Prevented a canceled Keychain request from immediately prompting again in
+  the same app session.
+- Avoided reading Keychain merely to render the UI, including when auto-connect
+  is disabled or a CLI-owned engine can be reused.
+
 ## 1.1.4 - 2026-08-22
 
 - Disabled electron-builder's implicit tag publishing so release artifacts are

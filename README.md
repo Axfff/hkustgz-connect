@@ -23,8 +23,8 @@ does not terminate an engine it did not start.
 The [release page](https://github.com/Axfff/hkustgz-connect/releases/latest)
 contains:
 
-- `hkustgzconnect-1.1.4-mac-arm64.dmg` for the menu-bar app;
-- `hkustgz-connect-cli-1.1.4-macos-arm64.tar.gz` for the CLI;
+- `hkustgzconnect-1.1.5-mac-arm64.dmg` for the menu-bar app;
+- `hkustgz-connect-cli-1.1.5-macos-arm64.tar.gz` for the CLI;
 - `SHA256SUMS.txt` for verification.
 
 The current binary release supports Apple silicon Macs. Intel and other
@@ -40,12 +40,20 @@ The community build is ad-hoc signed, not Apple-notarized. On first launch,
 right-click the app and choose **Open** if Gatekeeper asks for confirmation.
 The app lives in the menu bar after its window closes.
 
+macOS may separately request permission to use the Keychain when the saved VPN
+password is first needed. The app requests that saved VPN password at most once
+per launch and reuses the result only in memory until it quits. Launching with
+auto-connect disabled, or attaching to a CLI-owned engine, does not read it.
+Select **Always Allow** if macOS offers it. Because community releases do not
+yet have a stable Developer ID signature, macOS can request permission again
+after an app update.
+
 ### CLI
 
 Extract the CLI archive, then run:
 
 ```bash
-cd hkustgz-connect-cli-1.1.4-macos-arm64
+cd hkustgz-connect-cli-1.1.5-macos-arm64
 ./cli/hkustgzconnect configure YOUR_CAMPUS_USERNAME
 ./cli/hkustgzconnect set-password
 ./cli/hkustgzconnect up

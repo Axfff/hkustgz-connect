@@ -59,7 +59,9 @@ codesign --verify --deep --strict \
 
 Release artifacts are ad-hoc signed unless a Developer ID identity is supplied
 through electron-builder's standard signing environment. Do not describe an
-ad-hoc signature as notarization.
+ad-hoc signature as notarization. A stable Developer ID signature is also
+required for macOS to recognize updated builds as the same application when
+authorizing Electron `safeStorage` access to Keychain.
 
 ## Release checklist
 
