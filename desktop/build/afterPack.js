@@ -21,13 +21,14 @@ function stageLegalMaterials(resourcesDir) {
   fs.cpSync(path.join(root, 'LICENSES'), path.join(legalDir, 'LICENSES'), {
     recursive: true,
   });
-
   const electronDist = path.join(__dirname, '..', 'node_modules', 'electron', 'dist');
-  fs.copyFileSync(path.join(electronDist, 'LICENSE'), path.join(electronDir, 'LICENSE'));
-  fs.copyFileSync(
-    path.join(electronDist, 'LICENSES.chromium.html'),
-    path.join(electronDir, 'LICENSES.chromium.html'),
-  );
+  for (const file of ['LICENSE', 'LICENSES.chromium.html']) {
+    const source = path.join(electronDist, file);
+    if (!fs.existsSync(source)) {
+      throw new Error(`missing Electron legal material; run npm run prepare:electron: ${source}`);
+    }
+    fs.copyFileSync(source, path.join(electronDir, file));
+  }
 }
 
 exports.default = async function afterPack(context) {

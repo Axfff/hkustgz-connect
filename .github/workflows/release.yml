@@ -29,7 +29,7 @@ jobs:
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder --mac dmg zip --arm64
+        run: npm run dist:mac:release
       - run: bash scripts/build-cli.sh
       - run: bash scripts/package-release.sh
       - name: Publish GitHub release

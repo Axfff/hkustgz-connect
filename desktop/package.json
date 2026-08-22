@@ -1,6 +1,6 @@
 {
   "name": "hkustgzconnect",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "HKUST(GZ) EasyConnect-compatible client with a bundled Rust engine",
   "main": "main.js",
   "author": "HKUST(GZ) Connect contributors",
@@ -8,13 +8,15 @@
   "homepage": "https://github.com/Axfff/hkustgz-connect",
   "repository": "github:Axfff/hkustgz-connect",
   "scripts": {
+    "prepare:electron": "node node_modules/electron/install.js",
     "test": "node --test",
     "start": "electron .",
-    "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac",
-    "dist:mac:app": "electron-builder --mac dir --arm64",
-    "dist:win": "electron-builder --win --x64",
-    "dist:linux": "electron-builder --linux"
+    "dist": "npm run prepare:electron && electron-builder",
+    "dist:mac": "npm run prepare:electron && electron-builder --mac",
+    "dist:mac:app": "npm run prepare:electron && electron-builder --mac dir --arm64",
+    "dist:mac:release": "npm run prepare:electron && electron-builder --mac dmg zip --arm64",
+    "dist:win": "npm run prepare:electron && electron-builder --win --x64",
+    "dist:linux": "npm run prepare:electron && electron-builder --linux"
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",

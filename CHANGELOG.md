@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.3 - 2026-08-22
+
+- Made release builds prepare the pinned Electron distribution before staging
+  its Electron and Chromium notices, including on clean CI installs.
+
 ## 1.1.2 - 2026-08-22
 
 - Installed `ripgrep` explicitly in the macOS release job so the mandatory
