@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.2 - 2026-08-22
+
+- Installed `ripgrep` explicitly in the macOS release job so the mandatory
+  public-tree and license-boundary audit runs before packaging.
+
 ## 1.1.1 - 2026-08-22
 
 - Corrected public provenance for `heeh02/HKUST-GZ-Connect` and

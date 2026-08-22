@@ -17,6 +17,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      - name: Install public-audit dependency
+        run: brew install ripgrep
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.97.1 --profile minimal
       - run: npm --prefix desktop ci
