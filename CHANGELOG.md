@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.4 - 2026-08-22
+
+- Disabled electron-builder's implicit tag publishing so release artifacts are
+  published only after the repository's package and legal-material audits.
+
 ## 1.1.3 - 2026-08-22
 
 - Made release builds prepare the pinned Electron distribution before staging
