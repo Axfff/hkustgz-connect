@@ -58,4 +58,22 @@ desktop_version="$(node -p "require('./desktop/package.json').version")"
 [ "$root_version" = "$desktop_version" ] \
   || fail "version mismatch: root=$root_version desktop=$desktop_version"
 
+expected_license='GPL-3.0-only AND AGPL-3.0-only'
+root_license="$(node -p "require('./package.json').license")"
+desktop_license="$(node -p "require('./desktop/package.json').license")"
+[ "$root_license" = "$expected_license" ] \
+  || fail "unexpected root license expression: $root_license"
+[ "$desktop_license" = "$expected_license" ] \
+  || fail "unexpected desktop license expression: $desktop_license"
+rg -q '^license = "GPL-3.0-only AND AGPL-3.0-only"$' engine/Cargo.toml \
+  || fail 'engine manifest is missing the combined GPL/AGPL expression'
+
+for legal_file in \
+  LICENSE NOTICE.md PROVENANCE.md THIRD_PARTY_NOTICES.md \
+  LICENSES/GPL-3.0-only.txt LICENSES/AGPL-3.0-only.txt \
+  LICENSES/BSD-3-Clause-GeiserX-tailscale-rs.txt
+do
+  [ -s "$legal_file" ] || fail "missing legal material: $legal_file"
+done
+
 printf 'public-tree check passed for v%s\n' "$root_version"

@@ -20,7 +20,9 @@ cp "$ROOT/cli/config.toml.example" "$ROOT/cli/com.hkustgz.connect-fallback.plist
 cp "$ROOT/config/hkustgz.json" "$ROOT/config/policy.json.example" "$STAGE/config/"
 cp "$ROOT/engine/target/release/ec-engine" "$STAGE/engine/bin/ec-engine-darwin-$ARCH"
 cp "$ROOT/engine/target/release/ec-fallback" "$STAGE/engine/bin/ec-fallback-darwin-$ARCH"
-cp "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/NOTICE.md" "$STAGE/"
+cp "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/NOTICE.md" \
+  "$ROOT/PROVENANCE.md" "$ROOT/THIRD_PARTY_NOTICES.md" "$STAGE/"
+cp -R "$ROOT/LICENSES" "$STAGE/"
 chmod 755 "$STAGE/cli/hkustgzconnect" "$STAGE/engine/bin/"*
 for binary in "$STAGE/engine/bin/"*; do
   codesign --force --timestamp=none -s - "$binary"

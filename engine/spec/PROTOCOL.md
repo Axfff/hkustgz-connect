@@ -21,7 +21,7 @@ enabled by this profile remain separate release gates.
 
 ## Functional layers
 
-The independent implementation separates these layers:
+The project implementation separates these layers:
 
 1. Discovery: gateway version, capabilities, authentication entry point.
 2. Authentication: password, CAPTCHA, SMS, TOTP, certificate, HID, SSO.
@@ -164,7 +164,7 @@ The observed TCP opening sequence is:
 
 The official client checks successful exact reads for the 122- and 40-byte
 messages. Static evidence does not show a content comparison for the 122-byte
-server preface. The independent engine must still treat it as opaque until an
+server preface. The project engine must still treat it as opaque until an
 approved black-box test demonstrates what validation is required.
 
 ### Client message
@@ -237,7 +237,7 @@ written to the virtual interface; that transform is not implemented yet.
 
 The send-side liveness frame is an 88-byte `IPCP` frame containing a synthetic
 76-byte IPv4 ICMP packet. Its runtime-derived addresses, checksum inputs, and
-payload text are not yet sufficiently specified, so the independent code does
+payload text are not yet sufficiently specified, so the project code does
 not fabricate a heartbeat.
 
 ### Legacy behavior-derived implementation boundary

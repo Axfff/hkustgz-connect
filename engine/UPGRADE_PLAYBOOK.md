@@ -1,6 +1,6 @@
 # Upgrade and continuity playbook
 
-No independent implementation of a proprietary protocol can honestly
+No community implementation of a proprietary protocol can honestly
 guarantee compatibility with every future release. This project instead
 targets a measurable continuity objective: detect changes before rollout,
 fail closed, isolate the affected contract, validate a replacement against the
@@ -10,7 +10,7 @@ official client, and retain an official recovery path.
 
 | Event | Automatic signal | Release decision | Recovery action |
 |---|---|---|---|
-| `zju-connect` repository or releases disappear | none required at runtime | independent code unaffected | restore only historical GPL evidence from institutional archive; never fetch it during build/run |
+| `zju-connect` repository or releases disappear | none required at runtime | current build remains self-contained | restore the reviewed v1.1.1 source identifier and AGPL evidence from a controlled archive; never fetch it during build/run |
 | Public EasyConnect package/module changes | daily metadata, module, installer, and hash diff | block compatibility release | archive signed official artifact, classify changed capability, update isolated adapter and fixtures |
 | Authentication XML/state changes | parser/fixture failure or approved canary failure | block login release | add explicit auth state; never guess or fall through |
 | Modern token/control layout changes | 48/64-byte contract or status mismatch | block tunnel release | compare official module and authorized black-box trace; version the codec |
@@ -52,12 +52,12 @@ Availability during an unsupported interval comes from the signed official
 client and an out-of-band administration path, not from silently accepting an
 unknown protocol.
 
-## Independence checklist
+## Provenance and isolation checklist
 
 - No `zju-connect` binary, module, source download, Git dependency, or runtime
-  invocation in the independent crate.
-- GPL reference provenance and obligations remain documented even though the
-  implementation is native Rust.
+  invocation occurs during build or execution of the Rust crate.
+- GPL and AGPL provenance and obligations remain documented even though the
+  implementation is native Rust and self-contained at runtime.
 - Official vendor artifacts stay ignored and restricted; committed baselines
   contain hashes and structural facts only.
 - Credentials, TWFID, token, assigned address, cookies, packet contents, and

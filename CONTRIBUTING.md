@@ -35,5 +35,18 @@ and a security review.
 - Keep private campus CIDRs, DNS addresses, and internal hostnames in the
   ignored local policy, never in source, tests, issues, or documentation.
 
-By contributing, you agree that your contribution is licensed under
-GPL-3.0-only.
+## Contribution licensing
+
+The existing license boundaries must be preserved:
+
+- contributions outside `engine/` are licensed under `GPL-3.0-only` unless a
+  file is an identified third-party component under another license;
+- contributions to `engine/` are licensed under
+  `GPL-3.0-only AND AGPL-3.0-only`;
+- contributions spanning both areas grant the applicable license for each
+  affected area.
+
+By submitting a contribution, you certify that you have the right to provide
+it under those terms and that any copied, translated, vendored, linked, or
+source-reviewed upstream material is identified in `PROVENANCE.md`. Do not
+remove existing copyright, attribution, SPDX, or third-party license notices.

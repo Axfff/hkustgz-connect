@@ -1,9 +1,9 @@
 # Compatibility matrix
 
-This matrix prevents detection work from being mistaken for a finished
-independent VPN engine.
+This matrix prevents detection work from being mistaken for a finished VPN
+engine.
 
-| Capability | Production observation | Offline fixture | Independent engine | Official-client parity |
+| Capability | Production observation | Offline fixture | Project engine | Official-client parity |
 |---|---:|---:|---:|---:|
 | Public discovery | yes | yes | observer only | not applicable |
 | Package/version metadata | yes | yes | observer only | not applicable |
@@ -24,7 +24,7 @@ independent VPN engine.
 | Legacy IPCP framing | static official map | yes | bounded diagnostic codec | not used by active profile |
 | TCP via SOCKS5 | approved campus HTTPS 200 | parser and netstack tests | modular Rust runtime | repeated browser/curl pass |
 | UDP via SOCKS5 | current target returned no response | header/DNS/fragment/lifecycle fixtures | UDP ASSOCIATE relay; close remains healthy | reachable live UDP service pending |
-| Isolated Campus Browser | official resource/browser flow | URL/proxy policy fixtures | Electron session; all browser traffic uses tunnel | independent browser canary pending |
+| Isolated Campus Browser | official resource/browser flow | URL/proxy policy fixtures | Electron session; all browser traffic uses tunnel | project browser canary pending |
 | Domain-selective PAC | campus page loaded through PAC | exact/suffix/no-DNS fixtures | advanced integration endpoint | isolated Chrome pass |
 | VPN-side DNS | no DNS server in current profile | DNS codec fixtures | used when supplied | not applicable to current profile |
 | Explicit system DNS fallback | enabled by reviewed current profile | domain validation fixtures | modular Rust resolver | live domain CONNECT passed |
@@ -34,5 +34,5 @@ independent VPN engine.
 | Passive logout / forced upgrade | official package capability | pending | text error only; structured event pending | pending |
 
 Use `yes` only for evidence that can be reproduced. A production feature is
-supported only when the independent-engine and official-client-parity columns
+supported only when the project-engine and official-client-parity columns
 both pass for the gateway profile in scope.

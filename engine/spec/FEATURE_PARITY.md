@@ -27,7 +27,7 @@ enabled that feature.
 | Resource catalogue | Groups, Web resources, public/private folders and application resources | Resource-list parser exists; catalogue is not exposed to the desktop | Add a sanitized resource provider and UI; never log raw resource data |
 | Campus browsing | Resource page and external browser launch | Isolated in-app campus browser | Default novice path; no external browser or Clash required |
 | Application access | TCP and UDP application traffic | TCP supported; UDP frontend exists, live service coverage incomplete | Keep UDP canary as a release gate |
-| Remote application | Remote-app launch and notices | Not implemented | Independent launcher adapter only if the school enables it |
+| Remote application | Remote-app launch and notices | Not implemented | Separate launcher adapter only if the school enables it |
 | Connection lifecycle | Auto login, reconnect, cancellation, timeout and passive kick | Auto-connect/reconnect supported; passive reasons are not structured | Move engine output to versioned structured events |
 | User information | Login history, server messages and announcements | Not implemented | Read-only optional providers |
 | Client lifecycle | Version mismatch, module update and client update | Public package watcher exists; no end-user updater | Signed update manifest with staged rollout and rollback |

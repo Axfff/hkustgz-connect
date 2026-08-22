@@ -8,10 +8,23 @@ mkdir -p "$ROOT/dist"
 cli_archive="$ROOT/dist/hkustgz-connect-cli-$VERSION-macos-arm64.tar.gz"
 [ -f "$cli_archive" ] || "$ROOT/scripts/build-cli.sh" >/dev/null
 cli_stage="$ROOT/dist/hkustgz-connect-cli-$VERSION-macos-arm64"
+app_resources="$ROOT/desktop/release/mac-arm64/HKUST(GZ) Connect.app/Contents/Resources"
+
+node "$ROOT/desktop/build/verify-package.js" "$app_resources" darwin arm64
+
+for legal_file in \
+  LICENSE NOTICE.md PROVENANCE.md THIRD_PARTY_NOTICES.md \
+  LICENSES/GPL-3.0-only.txt LICENSES/AGPL-3.0-only.txt \
+  LICENSES/BSD-3-Clause-GeiserX-tailscale-rs.txt
+do
+  [ -f "$cli_stage/$legal_file" ] \
+    || { printf 'missing CLI legal material: %s\n' "$legal_file" >&2; exit 1; }
+done
 
 "$ROOT/scripts/check-release.sh" \
-  "$ROOT/desktop/release/mac-arm64/HKUST(GZ) Connect.app/Contents/Resources/app.asar" \
-  "$ROOT/desktop/release/mac-arm64/HKUST(GZ) Connect.app/Contents/Resources/engine" \
+  "$app_resources/app.asar" \
+  "$app_resources/engine" \
+  "$app_resources/legal" \
   "$cli_stage"
 
 for artifact in \

@@ -1,15 +1,20 @@
 # Rust engine
 
-`ec-engine` is an independent EasyConnect-compatible runtime for the configured
-HKUST(GZ) gateway. It authenticates with credentials supplied on standard input,
-maintains the campus data plane, resolves internal names through VPN DNS, and
-exposes a loopback-only SOCKS5 TCP/UDP listener.
+`ec-engine` is an EasyConnect-compatible Rust runtime for the configured
+HKUST(GZ) gateway. It authenticates with credentials supplied on standard
+input, maintains the campus data plane, resolves internal names through VPN
+DNS, and exposes a loopback-only SOCKS5 TCP/UDP listener.
 
-It does not build, download, link, or embed zju-connect or the official Sangfor
-client. Legacy behavior was derived from authorized black-box validation of the
-official client. The active modern protocol also used a license-compatible
-review of zju-connect v1.1.1 as a reference, followed by an independent Rust
-implementation and live validation.
+The engine retains GPL-3.0-only code ancestry from
+`heeh02/HKUST-GZ-Connect`. Its active modern protocol was also developed after
+review of the AGPL-3.0-only `zju-connect` v1.1.1 source. It does not build,
+download, link, embed, or invoke `zju-connect` or the official Sangfor client,
+but no clean-room or expression-level separation is claimed. The engine is
+therefore distributed under `GPL-3.0-only AND AGPL-3.0-only`. See the root
+`LICENSE`, `PROVENANCE.md`, and `NOTICE.md`.
+
+Authorized black-box validation of the official client and live gateway was
+also used for compatibility testing. No official client binary is distributed.
 
 ## Runtime properties
 

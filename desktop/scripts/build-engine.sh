@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and stage the independent Rust engine for local desktop development.
+# Build and stage the bundled Rust engine for local desktop development.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -34,4 +34,4 @@ mkdir -p "$HERE/engine"
 cp target/release/ec-engine "$HERE/engine/ec-engine-$PLATFORM-$ARCH"
 cp "$ROOT/config/hkustgz.json" "$HERE/engine/hkustgz.json"
 chmod 755 "$HERE/engine/ec-engine-$PLATFORM-$ARCH"
-echo "staged independent engine: engine/ec-engine-$PLATFORM-$ARCH"
+echo "staged bundled engine: engine/ec-engine-$PLATFORM-$ARCH"

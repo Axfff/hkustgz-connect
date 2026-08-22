@@ -76,6 +76,24 @@ if (platformName === 'darwin') {
   }
 }
 
+const requiredLegalFiles = [
+  'LICENSE',
+  'NOTICE.md',
+  'PROVENANCE.md',
+  'THIRD_PARTY_NOTICES.md',
+  'LICENSES/GPL-3.0-only.txt',
+  'LICENSES/AGPL-3.0-only.txt',
+  'LICENSES/BSD-3-Clause-GeiserX-tailscale-rs.txt',
+  'electron/LICENSE',
+  'electron/LICENSES.chromium.html',
+];
+for (const file of requiredLegalFiles) {
+  const legalFile = path.join(resources, 'legal', file);
+  if (!fs.existsSync(legalFile) || fs.statSync(legalFile).size === 0) {
+    throw new Error(`missing packaged legal material: ${legalFile}`);
+  }
+}
+
 const packagedManifest = JSON.parse(asar.extractFile(archive, 'package.json').toString('utf8'));
 const sourceManifest = require(path.join(__dirname, '..', 'package.json'));
 if (packagedManifest.version !== sourceManifest.version) {
@@ -83,7 +101,12 @@ if (packagedManifest.version !== sourceManifest.version) {
     `packaged version ${packagedManifest.version} does not match source ${sourceManifest.version}`,
   );
 }
+if (packagedManifest.license !== sourceManifest.license) {
+  throw new Error(
+    `packaged license ${packagedManifest.license} does not match source ${sourceManifest.license}`,
+  );
+}
 
 process.stdout.write(
-  `verified ${platformName}/${architectureName}: campus browser, settings update, engine, v${packagedManifest.version}\n`,
+  `verified ${platformName}/${architectureName}: app, engine, legal materials, v${packagedManifest.version}\n`,
 );

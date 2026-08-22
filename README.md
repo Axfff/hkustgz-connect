@@ -23,8 +23,8 @@ does not terminate an engine it did not start.
 The [release page](https://github.com/Axfff/hkustgz-connect/releases/latest)
 contains:
 
-- `hkustgzconnect-1.1.0-mac-arm64.dmg` for the menu-bar app;
-- `hkustgz-connect-cli-1.1.0-macos-arm64.tar.gz` for the CLI;
+- `hkustgzconnect-1.1.1-mac-arm64.dmg` for the menu-bar app;
+- `hkustgz-connect-cli-1.1.1-macos-arm64.tar.gz` for the CLI;
 - `SHA256SUMS.txt` for verification.
 
 The current binary release supports Apple silicon Macs. Intel and other
@@ -45,7 +45,7 @@ The app lives in the menu bar after its window closes.
 Extract the CLI archive, then run:
 
 ```bash
-cd hkustgz-connect-cli-1.1.0-macos-arm64
+cd hkustgz-connect-cli-1.1.1-macos-arm64
 ./cli/hkustgzconnect configure YOUR_CAMPUS_USERNAME
 ./cli/hkustgzconnect set-password
 ./cli/hkustgzconnect up
@@ -141,4 +141,17 @@ by Git. Release archives are generated under `dist/`.
 
 ## License
 
-GPL-3.0-only. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
+This is a mixed-provenance GPLv3/AGPLv3 combined distribution, not a
+permissively licensed rewrite:
+
+- inherited desktop, CLI, documentation, and tooling material remains
+  `GPL-3.0-only`;
+- `engine/` is handled conservatively as
+  `GPL-3.0-only AND AGPL-3.0-only`;
+- third-party components, including the BSD-3-Clause userspace netstack,
+  retain their own licenses.
+
+See [LICENSE](LICENSE), [source provenance](PROVENANCE.md),
+[notices](NOTICE.md), [third-party notices](THIRD_PARTY_NOTICES.md), and the
+complete texts under [LICENSES](LICENSES/). These files are included in both
+CLI and desktop release packages.

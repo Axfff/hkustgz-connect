@@ -1,4 +1,4 @@
-# Independent engine maintenance policy
+# Engine maintenance policy
 
 No implementation can guarantee compatibility with every future proprietary
 gateway revision. The maintainable goal is narrower and testable: detect a
@@ -27,10 +27,10 @@ that work is in progress.
 5. **Specify** — analysts produce a behavior-only specification and synthetic
    fixtures. Decompiled source, raw tokens, credentials, and packet captures
    stay in restricted storage.
-6. **Implement** — the independent engine changes only the affected adapter or
+6. **Implement** — the project engine changes only the affected adapter or
    state transition. The desktop UI talks to a versioned local engine API and
    does not contain gateway protocol logic.
-7. **Validate** — official and independent clients run the same approved
+7. **Validate** — official and project clients run the same approved
    compatibility matrix. Negative, reconnect, timeout, and downgrade cases are
    mandatory.
 8. **Canary and release** — deploy to staff canaries, observe failure metrics,
@@ -88,7 +88,7 @@ A release is blocked unless all applicable gates pass:
 
 - offline parser and state-machine tests;
 - sanitized fixture tests for every supported gateway family;
-- official-client versus independent-engine black-box parity;
+- official-client versus project-engine black-box parity;
 - official package publisher verification plus binary/text/adapter hash review;
 - SOCKS TCP, SOCKS UDP, PAC routing, reconnect, idle lifetime, timeout, and
   logout tests;
@@ -106,7 +106,7 @@ record, not a repair.
 ## Fallback and availability
 
 The school should retain a vendor-supported EasyConnect/aTrust distribution
-channel and a documented emergency procedure. The independent client can
+channel and a documented emergency procedure. The community client can
 reduce vendor and upstream-project dependency, but it must not become the only
 way administrators can reach recovery systems.
 

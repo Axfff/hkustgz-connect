@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.1 - 2026-08-22
+
+- Corrected public provenance for `heeh02/HKUST-GZ-Connect` and
+  `Mythologyli/zju-connect` instead of describing the engine as an unrelated
+  independent implementation.
+- Documented the distribution as a GPLv3/AGPLv3 combined work while preserving
+  GPL-3.0-only on inherited interface material.
+- Added the complete GPL and AGPL texts, the required GeiserX/Tailscale
+  BSD-3-Clause notice, and a source-provenance record.
+- Made desktop and CLI release packaging include and verify legal materials,
+  including Electron and Chromium notices.
+
 ## 1.1.0 - 2026-08-22
 
 - Consolidated the Rust engine, macOS CLI, Electron menu-bar app, configuration,

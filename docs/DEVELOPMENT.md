@@ -10,6 +10,7 @@
 | `config/` | Public gateway profile and empty local-policy schema |
 | `scripts/` | Public-tree audit and release assembly |
 | `.github/workflows/` | CI and tag release automation |
+| `LICENSE`, `LICENSES/`, `PROVENANCE.md` | License boundaries, complete terms, and upstream record |
 
 Generated binaries are never source-of-truth. The desktop build stages the
 engine from `engine/target/release/` and the CLI release script assembles the
@@ -65,12 +66,20 @@ ad-hoc signature as notarization.
 1. Update versions in root and desktop manifests and add the changelog entry.
 2. Pass format, lint, Rust tests, Node tests, shell syntax, and public audit.
 3. Build the engine once from the committed lockfile.
-4. Package and verify the app and CLI archive.
+4. Package and verify the app and CLI archive. Confirm both contain `LICENSE`,
+   `LICENSES/`, `NOTICE.md`, `PROVENANCE.md`, and `THIRD_PARTY_NOTICES.md`; the
+   desktop must also contain Electron and Chromium notices.
 5. Run approved coexistence canaries in both start orders.
 6. Generate `SHA256SUMS.txt` from the exact upload artifacts.
 7. Review `git ls-files` and `git diff --cached` for private material; run the
    RFC 1918 and identity audit immediately before tagging.
 8. Tag `vX.Y.Z`; the release workflow rebuilds and publishes the artifacts.
+
+Changes to source ancestry, copied code, source-reviewed implementations, or
+dependencies must update `PROVENANCE.md` and the applicable license files in
+the same commit. Do not use a permissive project license or describe the
+engine as a clean-room implementation without documented permission and
+qualified provenance review.
 
 ## Recovery
 
