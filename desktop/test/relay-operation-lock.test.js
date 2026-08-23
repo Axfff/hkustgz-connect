@@ -20,12 +20,22 @@ function temporaryHome() {
 test('desktop relay lock is owner-only and mutually exclusive', async () => {
   const home = temporaryHome();
   const lockFile = relayOperationLockPath(home);
-  const lease = await acquireRelayOperationLock({ lockFile });
+  const scriptedStatuses = [0, 75, 0];
+  const runLockf = process.platform === 'darwin'
+    ? undefined
+    : (command, args, options) => {
+      assert.equal(command, '/usr/bin/lockf');
+      assert.deepEqual(args, ['-s', '-t', '0', '3']);
+      assert.equal(Number.isInteger(options.stdio[3]), true);
+      return { status: scriptedStatuses.shift(), stderr: Buffer.alloc(0) };
+    };
+  const acquire = () => acquireRelayOperationLock({ lockFile, runLockf });
+  const lease = await acquire();
 
   assert.equal(fs.statSync(path.dirname(lockFile)).mode & 0o777, 0o700);
   assert.equal(fs.statSync(lockFile).mode & 0o777, 0o600);
   assert.throws(
-    () => acquireRelayOperationLock({ lockFile }),
+    () => acquire(),
     (error) => error instanceof RelayOperationBusyError
       && error.code === 'RELAY_OPERATION_BUSY',
   );
@@ -34,8 +44,9 @@ test('desktop relay lock is owner-only and mutually exclusive', async () => {
   assert.equal(await lease.release(), false);
   assert.equal(fs.existsSync(lockFile), true, 'persistent lock files avoid unlink races');
 
-  const nextLease = await acquireRelayOperationLock({ lockFile });
+  const nextLease = await acquire();
   assert.equal(await nextLease.release(), true);
+  assert.equal(scriptedStatuses.length, process.platform === 'darwin' ? 3 : 0);
   fs.rmSync(home, { recursive: true, force: true });
 });
 
