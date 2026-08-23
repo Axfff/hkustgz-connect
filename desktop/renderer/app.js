@@ -19,6 +19,7 @@ let resources = [];
 let pacUrl = '';
 let sshConfig = '';
 let shadowrocketModule = '';
+let hpcSsh = { supported: false, installed: false, alias: 'hkustgz-hpc' };
 let currentPage = 'overview';
 const pageScrollPositions = new Map();
 let openBusy = false;
@@ -146,6 +147,19 @@ function renderResources() {
   $('accessResources').innerHTML = markup;
 }
 
+function renderHpcSsh(next = {}) {
+  hpcSsh = { ...hpcSsh, ...next };
+  $('hpcSshRow').hidden = !hpcSsh.supported;
+  if (!hpcSsh.supported) return;
+  $('hpcSshStatus').textContent = hpcSsh.installed
+    ? `ssh USER@${hpcSsh.alias}`
+    : 'Automatic direct-on-campus routing';
+  const button = $('hpcSshButton');
+  button.querySelector('use').setAttribute('href', hpcSsh.installed ? '#i-x' : '#i-terminal');
+  button.querySelector('span').textContent = hpcSsh.installed ? 'Remove' : 'Install';
+  button.title = hpcSsh.installed ? 'Remove managed HPC SSH route' : 'Install managed HPC SSH route';
+}
+
 function renderDiagnostics(diagnostics = {}) {
   const running = !!diagnostics.running;
   const checks = Array.isArray(diagnostics.checks) ? diagnostics.checks : [];
@@ -199,6 +213,7 @@ async function refreshState({ preserveSettings = false } = {}) {
   $('pacEndpoint').textContent = pacUrl || '-';
   $('sidebarAccount').textContent = settings.username || '-';
   $('sidebarVersion').textContent = next.version ? `Version ${next.version}` : '-';
+  renderHpcSsh(next.hpcSsh);
   $('loginUsername').value = settings.username || '';
   if (!preserveSettings || !settingsDirty) populateSettings();
   showAuthenticated(next.loggedIn);
@@ -335,9 +350,27 @@ document.querySelectorAll('.copy-trigger').forEach((button) => button.addEventLi
   }
   if (!value) return;
   await window.api.copy(value);
+  $('copyMessage').classList.remove('error');
   $('copyMessage').textContent = 'Copied.';
   setTimeout(() => { $('copyMessage').textContent = ''; }, 1200);
 }));
+
+$('hpcSshButton').addEventListener('click', async () => {
+  const button = $('hpcSshButton');
+  button.disabled = true;
+  try {
+    const result = hpcSsh.installed
+      ? await window.api.removeHpcSsh()
+      : await window.api.installHpcSsh();
+    renderHpcSsh(result?.state);
+    $('copyMessage').classList.toggle('error', !result?.ok);
+    $('copyMessage').textContent = result?.ok
+      ? (hpcSsh.installed ? `Ready: ssh USER@${hpcSsh.alias}` : 'HPC SSH route removed.')
+      : result?.error || 'HPC SSH route could not be changed.';
+  } finally {
+    button.disabled = false;
+  }
+});
 
 $('refreshLogs').addEventListener('click', loadLogs);
 $('copyLogs').addEventListener('click', async () => { await window.api.copy($('logs').textContent); });

@@ -100,7 +100,22 @@ autostart starts first, the app will attach when it opens.
 The local SOCKS5 endpoint is `127.0.0.1:1080`. It admits only the public campus
 domains plus any network ranges in the user's local policy.
 
-For SSH, add a host-specific block to `~/.ssh/config`:
+On macOS, the common HPC login has a managed setup under **Access > External
+applications > HPC SSH**. Choose **Install** once, then use either:
+
+```bash
+ssh YOUR_HPC_USERNAME@hkustgz-hpc
+ssh YOUR_HPC_USERNAME@hpc2login.hpc.hkust-gz.edu.cn
+```
+
+The installed helper first reuses a direct connection when the HPC service is
+reachable on campus. Otherwise it passes the unresolved hostname to the campus
+SOCKS engine, so private campus DNS does not depend on the system or
+Shadowrocket resolver. The installation updates automatically with the app's
+SOCKS port and can be removed from the same control.
+
+For private IP servers and other manually approved SSH targets, add a
+host-specific block to `~/.ssh/config`:
 
 ```sshconfig
 Host campus-server

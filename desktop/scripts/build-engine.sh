@@ -29,9 +29,10 @@ run_cargo() {
 }
 
 cd "$ROOT/engine"
-LZMA_API_STATIC=1 run_cargo build --locked --release --bin ec-engine
+LZMA_API_STATIC=1 run_cargo build --locked --release --bin ec-engine --bin ec-ssh-route
 mkdir -p "$HERE/engine"
 cp target/release/ec-engine "$HERE/engine/ec-engine-$PLATFORM-$ARCH"
+cp target/release/ec-ssh-route "$HERE/engine/ec-ssh-route-$PLATFORM-$ARCH"
 cp "$ROOT/config/hkustgz.json" "$HERE/engine/hkustgz.json"
-chmod 755 "$HERE/engine/ec-engine-$PLATFORM-$ARCH"
-echo "staged bundled engine: engine/ec-engine-$PLATFORM-$ARCH"
+chmod 755 "$HERE/engine/ec-engine-$PLATFORM-$ARCH" "$HERE/engine/ec-ssh-route-$PLATFORM-$ARCH"
+echo "staged bundled engine and SSH helper for $PLATFORM-$ARCH"

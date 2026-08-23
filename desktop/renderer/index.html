@@ -25,6 +25,7 @@
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></symbol>
     <symbol id="i-browser" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M7 6h.01M10 6h.01"/></symbol>
     <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></symbol>
     <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/><path d="m8 12 3 3 5-6"/></symbol>
     <symbol id="i-log-out" viewBox="0 0 24 24"><path d="M10 4H4v16h6M14 8l4 4-4 4m4-4H8"/></symbol>
   </svg>
@@ -140,6 +141,7 @@
           <section class="section">
             <div class="section-heading"><h2>External applications</h2></div>
             <div class="tool-list">
+              <div id="hpcSshRow" class="tool-row"><div><strong>HPC SSH</strong><code id="hpcSshStatus">Checking...</code></div><button id="hpcSshButton" class="button secondary" type="button"><svg><use href="#i-terminal"></use></svg><span>Install</span></button></div>
               <div class="tool-row"><div><strong>SOCKS5 endpoint</strong><code id="socksEndpoint">127.0.0.1:1080</code></div><button class="icon-button copy-trigger" type="button" data-copy="socks" aria-label="Copy SOCKS5 endpoint" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
               <div class="tool-row"><div><strong>PAC URL</strong><code id="pacEndpoint">-</code></div><button class="icon-button copy-trigger" type="button" data-copy="pac" aria-label="Copy PAC URL" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
               <div class="tool-row"><div><strong>SSH ProxyCommand</strong><code id="sshEndpoint">Load the generated snippet</code></div><button class="icon-button copy-trigger" type="button" data-copy="ssh" aria-label="Copy SSH ProxyCommand" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>

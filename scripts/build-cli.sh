@@ -8,7 +8,7 @@ case "$(uname -s)" in Darwin) PLATFORM="macos" ;; *) echo 'macOS release build r
 case "$(uname -m)" in arm64) ARCH="arm64" ;; x86_64) ARCH="amd64" ;; *) echo 'unsupported architecture' >&2; exit 1 ;; esac
 
 cd "$ROOT/engine"
-LZMA_API_STATIC=1 cargo build --locked --release --bin ec-engine --bin ec-fallback
+LZMA_API_STATIC=1 cargo build --locked --release --bin ec-engine --bin ec-fallback --bin ec-ssh-route
 
 NAME="hkustgz-connect-cli-$VERSION-$PLATFORM-$ARCH"
 STAGE="$ROOT/dist/$NAME"
@@ -21,6 +21,7 @@ cp "$ROOT/cli/config.toml.example" "$ROOT/cli/com.hkustgz.connect-fallback.plist
 cp "$ROOT/config/hkustgz.json" "$ROOT/config/policy.json.example" "$STAGE/config/"
 cp "$ROOT/engine/target/release/ec-engine" "$STAGE/engine/bin/ec-engine-darwin-$ARCH"
 cp "$ROOT/engine/target/release/ec-fallback" "$STAGE/engine/bin/ec-fallback-darwin-$ARCH"
+cp "$ROOT/engine/target/release/ec-ssh-route" "$STAGE/engine/bin/ec-ssh-route-darwin-$ARCH"
 cp "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/NOTICE.md" \
   "$ROOT/PROVENANCE.md" "$ROOT/THIRD_PARTY_NOTICES.md" "$STAGE/"
 cp -R "$ROOT/LICENSES" "$STAGE/"

@@ -9,6 +9,7 @@ CLI ----------+             |
                             +---- destination allowlist and VPN DNS
 
 Shadowrocket ---- 127.0.0.1:1081 ---- optional fallback relay ---- 1080
+OpenSSH ---- direct-first ec-ssh-route ---- direct campus TCP or 1080
 ```
 
 `engine/` is the only implementation of authentication, tunnel framing, VPN

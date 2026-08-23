@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0 - 2026-08-23
+
+- Added a one-action macOS HPC SSH route under **Access > External
+  applications**, with reversible managed configuration and a friendly
+  `hkustgz-hpc` alias.
+- Added a restricted `ec-ssh-route` helper that reuses a bounded direct campus
+  connection when available and otherwise sends the unresolved campus hostname
+  through the local SOCKS engine.
+- Preserved unrelated SSH configuration, created an owner-only one-time backup,
+  and automatically updated the managed route when the SOCKS port changes.
+- Added direct, SOCKS protocol, configuration lifecycle, symlink-safety, and
+  package-content regression coverage.
+
 ## 1.1.9 - 2026-08-23
 
 - Fixed CLI Shadowrocket module generation for CIDRs emitted with JSON-escaped

@@ -46,6 +46,14 @@ Host campus-server
 Use host-specific blocks. Do not combine this with `ProxyJump` for the same
 host unless the jump host design explicitly requires it.
 
+The frequently used HPC login has a managed macOS path in **Access > External
+applications > HPC SSH**. It installs an owner-only helper and one marked block
+in `~/.ssh/config`, preserving unrelated entries and a one-time backup. Both
+`hkustgz-hpc` and `hpc2login.hpc.hkust-gz.edu.cn` then use a bounded direct-first
+route: a working on-campus TCP connection is reused as-is, while off-campus
+connections pass the hostname unresolved to the campus SOCKS engine. The
+helper accepts only the reviewed campus domain suffixes.
+
 ## Shadowrocket coexistence
 
 The optional `ec-fallback` process listens on `127.0.0.1:1081`. Shadowrocket
@@ -81,9 +89,11 @@ The generated module contains no credentials or private topology from the
 repository. It adds locally configured CIDRs only when generated on the user's
 machine. It also adds those CIDRs as `tun-included-routes`, ensuring macOS sends
 more-specific private routes to Shadowrocket before the campus rule is applied.
-Its DNS settings use proxied DoH, disable system-DNS fallback and
-IPv6 address racing, and hijack port 53 so native Node/Electron WebSockets do
-not receive poisoned system answers while Chromium HTTPS still appears usable.
+Its DNS settings use proxied DoH, disable system-DNS fallback and IPv6 address
+racing, and hijack port 53 so native Node/Electron WebSockets do not receive
+poisoned system answers while Chromium HTTPS still appears usable. OpenSSH
+does not rely on that public resolver: the managed HPC helper passes an
+unresolved off-campus hostname directly to the campus engine for VPN-side DNS.
 It also keeps the documented ChatGPT/Codex WebSocket domains on Shadowrocket's
 normal `PROXY` policy.
 

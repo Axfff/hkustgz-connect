@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('api', {
   logout: () => ipcRenderer.invoke('logout'),
   getLogs: () => ipcRenderer.invoke('get-logs'),
   openLog: () => ipcRenderer.invoke('open-log'),
+  installHpcSsh: () => ipcRenderer.invoke('install-hpc-ssh'),
+  removeHpcSsh: () => ipcRenderer.invoke('remove-hpc-ssh'),
   sshConfig: () => ipcRenderer.invoke('ssh-config'),
   shadowrocketModule: () => ipcRenderer.invoke('shadowrocket-module'),
   copy: (text) => ipcRenderer.invoke('copy', text),

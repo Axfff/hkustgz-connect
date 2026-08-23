@@ -26,7 +26,8 @@ for runtime_file in \
   cli/campus-only.pac.template \
   cli/shadowrocket-hkustgz.module.template \
   engine/bin/ec-engine-darwin-arm64 \
-  engine/bin/ec-fallback-darwin-arm64
+  engine/bin/ec-fallback-darwin-arm64 \
+  engine/bin/ec-ssh-route-darwin-arm64
 do
   [ -f "$cli_stage/$runtime_file" ] \
     || { printf 'missing CLI runtime material: %s\n' "$runtime_file" >&2; exit 1; }

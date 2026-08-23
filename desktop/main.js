@@ -26,6 +26,9 @@ const {
   diagnosticsAreHealthy, probeIpv4Route, probeTcpEndpoint, probeWebSocketEndpoint,
 } = require('./lib/diagnostics');
 const { renderShadowrocketModule } = require('./lib/shadowrocket-module');
+const {
+  installManagedSsh, managedSshState, removeManagedSsh,
+} = require('./lib/hpc-ssh');
 const { deriveOperationalState } = require('./lib/presentation-state');
 const {
   PROBE_TIMEOUT_MS, TELEMETRY_TICK_MS, shouldProbe, shouldRecover,
@@ -51,6 +54,8 @@ const PAC_FILE = path.join(DATA, 'routing.pac');
 const CAMPUS_CREDENTIALS = path.join(DATA, 'campus-credentials.json');
 const SHARED_CONFIG_HOME = process.env.XDG_CONFIG_HOME || path.join(app.getPath('home'), '.config');
 const POLICY = path.join(SHARED_CONFIG_HOME, 'hkustgz-connect', 'policy.json');
+const SSH_CONFIG = path.join(app.getPath('home'), '.ssh', 'config');
+const SSH_HELPER = path.join(app.getPath('home'), '.hkustgzconnect', 'bin', 'ec-ssh-route');
 const GATEWAY_HOST = 'remote.hkust-gz.edu.cn';
 const passwordSession = new PasswordSession({
   file: CRED,
@@ -126,6 +131,34 @@ function engineConfigPath() {
     ? [path.join(process.resourcesPath, 'engine', 'hkustgz.json')]
     : [path.join(__dirname, '..', 'config', 'hkustgz.json')];
   return candidates.find((p) => fs.existsSync(p)) || candidates[0];
+}
+
+function sshHelperSourcePath() {
+  const plat = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'darwin' : 'linux';
+  const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
+  const ext = plat === 'windows' ? '.exe' : '';
+  const named = `ec-ssh-route-${plat}-${arch}${ext}`;
+  const dir = app.isPackaged ? path.join(process.resourcesPath, 'engine') : path.join(__dirname, 'engine');
+  const candidates = [
+    path.join(dir, named),
+    path.join(dir, plat === 'windows' ? 'ec-ssh-route.exe' : 'ec-ssh-route'),
+    path.join(__dirname, '..', 'engine', 'target', 'release', plat === 'windows' ? 'ec-ssh-route.exe' : 'ec-ssh-route'),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+}
+
+function hpcSshState() {
+  return managedSshState({ configFile: SSH_CONFIG, helperTarget: SSH_HELPER });
+}
+
+function installHpcSsh(port = socksPort()) {
+  if (process.platform !== 'darwin') throw new Error('Managed HPC SSH is currently available on macOS');
+  return installManagedSsh({
+    configFile: SSH_CONFIG,
+    helperSource: sshHelperSourcePath(),
+    helperTarget: SSH_HELPER,
+    proxyPort: port,
+  });
 }
 
 function publicRuntimeState() {
@@ -741,6 +774,7 @@ ipcMain.handle('get-state', () => {
     loggedIn: (passwordPresent && !!loadSettings().username) || !!externalEnginePid,
     platform: process.platform,
     version: app.getVersion(), campusResources: loadCampusResources(), telemetry: lastTele,
+    hpcSsh: hpcSshState(),
   };
 });
 ipcMain.handle('save', async (_e, p) => {
@@ -776,6 +810,14 @@ ipcMain.handle('save', async (_e, p) => {
   } catch (error) {
     pacError = `设置已保存，但 PAC 文件写入失败：${error.message}`;
   }
+  if (portChanged && hpcSshState().installed) {
+    try {
+      installHpcSsh(next.port);
+    } catch (error) {
+      const warning = `Settings saved, but the managed HPC SSH route could not be updated: ${error.message}`;
+      pacError = pacError ? `${pacError} ${warning}` : warning;
+    }
+  }
   if (p && typeof p.password === 'string' && p.password.length && !await savePassword(p.password)) {
     return { ok: false, error: '系统安全存储不可用，密码未保存' };
   }
@@ -806,6 +848,20 @@ ipcMain.handle('connect', async () => { await connect(); return { ok: true }; })
 ipcMain.handle('disconnect', () => { disconnect(); return { ok: true }; });
 ipcMain.handle('reconnect', reconnect);
 ipcMain.handle('run-diagnostics', runDiagnostics);
+ipcMain.handle('install-hpc-ssh', () => {
+  try { return { ok: true, state: installHpcSsh() }; }
+  catch (error) { return { ok: false, error: error.message, state: hpcSshState() }; }
+});
+ipcMain.handle('remove-hpc-ssh', () => {
+  try {
+    return {
+      ok: true,
+      state: removeManagedSsh({ configFile: SSH_CONFIG, helperTarget: SSH_HELPER }),
+    };
+  } catch (error) {
+    return { ok: false, error: error.message, state: hpcSshState() };
+  }
+});
 ipcMain.handle('ssh-config', () => {
   const port = socksPort();
   const note = '# Direct Host blocks only; do not combine with ProxyJump.';

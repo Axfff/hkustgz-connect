@@ -26,6 +26,7 @@ const requiredEntries = [
   '/lib/campus-browser.js',
   '/lib/campus-credential-vault.js',
   '/lib/diagnostics.js',
+  '/lib/hpc-ssh.js',
   '/lib/shadowrocket-module.js',
   '/lib/network-policy.js',
   '/lib/presentation-state.js',
@@ -53,28 +54,38 @@ if (!fs.existsSync(engine) || fs.statSync(engine).size === 0) {
   throw new Error(`missing packaged engine: ${engine}`);
 }
 
+const helperName = `ec-ssh-route-${platformName}-${architectureName}${extension}`;
+const helper = path.join(resources, 'engine', helperName);
+if (!fs.existsSync(helper) || fs.statSync(helper).size === 0) {
+  throw new Error(`missing packaged HPC SSH helper: ${helper}`);
+}
+
 if (platformName === 'darwin') {
-  const header = fs.readFileSync(engine).subarray(0, 8);
-  const magic = header.length >= 8 ? header.readUInt32LE(0) : -1;
-  const cpuType = header.length >= 8 ? header.readUInt32LE(4) : -1;
   const expectedCpu = architectureName === 'arm64' ? 0x0100000c : 0x01000007;
-  if (magic !== 0xfeedfacf || cpuType !== expectedCpu) {
-    throw new Error(
-      `packaged engine is not a ${architectureName} 64-bit Mach-O executable: ${engine}`,
-    );
+  for (const executable of [engine, helper]) {
+    const header = fs.readFileSync(executable).subarray(0, 8);
+    const magic = header.length >= 8 ? header.readUInt32LE(0) : -1;
+    const cpuType = header.length >= 8 ? header.readUInt32LE(4) : -1;
+    if (magic !== 0xfeedfacf || cpuType !== expectedCpu) {
+      throw new Error(
+        `packaged executable is not a ${architectureName} 64-bit Mach-O file: ${executable}`,
+      );
+    }
   }
 } else if (platformName === 'windows') {
-  const header = fs.readFileSync(engine);
-  const peOffset = header.length >= 0x40 ? header.readUInt32LE(0x3c) : -1;
-  const signature = peOffset >= 0 && peOffset + 6 <= header.length
-    ? header.subarray(peOffset, peOffset + 4).toString('binary')
-    : '';
-  const machine = signature === 'PE\u0000\u0000' ? header.readUInt16LE(peOffset + 4) : -1;
   const expectedMachine = architectureName === 'arm64' ? 0xaa64 : 0x8664;
-  if (machine !== expectedMachine) {
-    throw new Error(
-      `packaged engine is not a ${architectureName} Windows PE executable: ${engine}`,
-    );
+  for (const executable of [engine, helper]) {
+    const header = fs.readFileSync(executable);
+    const peOffset = header.length >= 0x40 ? header.readUInt32LE(0x3c) : -1;
+    const signature = peOffset >= 0 && peOffset + 6 <= header.length
+      ? header.subarray(peOffset, peOffset + 4).toString('binary')
+      : '';
+    const machine = signature === 'PE\u0000\u0000' ? header.readUInt16LE(peOffset + 4) : -1;
+    if (machine !== expectedMachine) {
+      throw new Error(
+        `packaged executable is not a ${architectureName} Windows PE file: ${executable}`,
+      );
+    }
   }
 }
 
