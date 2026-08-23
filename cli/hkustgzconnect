@@ -156,19 +156,23 @@ write_shadowrocket_module() {
   [ -f "$SHADOWROCKET_TEMPLATE" ] || die "Shadowrocket module template is missing"
   local temporary="$SHADOWROCKET_MODULE.$$.tmp"
   local route_marker='__ROUTE_IPV4_RULES__' tun_marker='__TUN_INCLUDED_ROUTES__'
-  local route_json='[]' route_count=0 tun_count=0 route_csv='' cidr line
+  local policy_route_count=0 route_index=0 route_count=0 tun_count=0 route_csv='' cidr line
   local -a routes=()
   if [ -f "$POLICY" ]; then
-    route_json="$(plutil -extract route_ipv4_cidrs json -expect array -o - "$POLICY" 2>/dev/null)" \
+    policy_route_count="$(plutil -extract route_ipv4_cidrs raw -expect array -o - "$POLICY" 2>/dev/null)" \
       || die "local network policy is invalid: $POLICY"
+    [[ "$policy_route_count" =~ ^[0-9]+$ ]] \
+      || die "local network policy has an invalid route array: $POLICY"
   fi
-  while IFS= read -r cidr; do
-    [ -n "$cidr" ] || continue
+  while [ "$route_index" -lt "$policy_route_count" ]; do
+    cidr="$(plutil -extract "route_ipv4_cidrs.$route_index" raw -expect string -o - "$POLICY" 2>/dev/null)" \
+      || die "local network policy route[$route_index] must be a string"
     [[ "$cidr" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([1-9]|[12][0-9]|3[0-2])$ ]] \
-      || die "local network policy contains an invalid route"
+      || die "local network policy route[$route_index] is invalid: $cidr"
     routes+=("$cidr")
     [ -z "$route_csv" ] && route_csv="$cidr" || route_csv="$route_csv, $cidr"
-  done < <(printf '%s' "$route_json" | tr -d '[]" ' | tr ',' '\n')
+    route_index=$((route_index + 1))
+  done
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       "$tun_marker")

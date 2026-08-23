@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.9 - 2026-08-23
+
+- Fixed CLI Shadowrocket module generation for CIDRs emitted with JSON-escaped
+  slashes by macOS `plutil`.
+- Added a macOS CLI integration test covering generated `/32` and `/24` route
+  rules.
+
 ## 1.1.8 - 2026-08-23
 
 - Added Shadowrocket `tun-included-routes` for locally configured private CIDRs,

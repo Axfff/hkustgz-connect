@@ -1,6 +1,6 @@
 {
   "name": "hkustgz-connect-monorepo",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "private": true,
   "license": "GPL-3.0-only AND AGPL-3.0-only",
   "homepage": "https://github.com/Axfff/hkustgz-connect",
@@ -8,7 +8,7 @@
   "scripts": {
     "test": "npm --prefix desktop test",
     "test:engine": "cargo +1.97.1 test --locked --manifest-path engine/Cargo.toml",
-    "check": "bash scripts/check-public.sh && bash -n cli/hkustgzconnect && npm --prefix desktop test && npm --prefix desktop audit --audit-level=high",
+    "check": "bash scripts/check-public.sh && bash -n cli/hkustgzconnect && bash scripts/test-cli.sh && npm --prefix desktop test && npm --prefix desktop audit --audit-level=high",
     "build:engine": "bash desktop/scripts/build-engine.sh",
     "build:cli": "bash scripts/build-cli.sh",
     "build:mac": "npm --prefix desktop run dist:mac:app"
