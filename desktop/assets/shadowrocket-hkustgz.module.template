@@ -10,7 +10,9 @@ fallback-dns-server = https://1.1.1.1/dns-query#proxy
 dns-direct-system = false
 dns-fallback-system = false
 dns-direct-fallback-proxy = true
+private-ip-answer = true
 hijack-dns = :53
+__TUN_INCLUDED_ROUTES__
 
 [Rule]
 # Keep ChatGPT and Codex HTTPS/WebSocket traffic on Shadowrocket's normal node.

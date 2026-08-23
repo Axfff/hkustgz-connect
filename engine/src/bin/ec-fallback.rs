@@ -20,7 +20,9 @@ const MAX_METHODS: usize = 32;
 const MAX_DOMAIN: usize = 253;
 const MAX_CONNECTIONS: usize = 256;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-const UPSTREAM_TIMEOUT: Duration = Duration::from_millis(750);
+// The campus engine may spend up to ten seconds establishing a tunnel-side TCP
+// connection. The relay must not fail a healthy request before that deadline.
+const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(12);
 const DIRECT_TIMEOUT: Duration = Duration::from_secs(8);
 const CAMPUS_DOMAIN_SUFFIXES: &[&str] = &["hkust-gz.edu.cn", "hkust.edu.hk"];
 
@@ -413,5 +415,11 @@ mod tests {
             classify_target(&target("203.0.113.8", Some(Ipv4Addr::new(203, 0, 113, 8)),)),
             TargetClass::General
         );
+    }
+
+    #[test]
+    fn campus_upstream_deadline_covers_the_engine_connect_budget() {
+        assert!(UPSTREAM_TIMEOUT > Duration::from_secs(10));
+        assert!(UPSTREAM_TIMEOUT <= Duration::from_secs(15));
     }
 }

@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { execFile } = require('node:child_process');
 const net = require('node:net');
 const tls = require('node:tls');
 
@@ -30,6 +31,31 @@ function diagnosticsAreHealthy(checks) {
   const required = (Array.isArray(checks) ? checks : [])
     .filter((check) => check.required !== false);
   return required.length > 0 && required.every((check) => check.status === 'pass');
+}
+
+function parseRouteInterface(output) {
+  return String(output || '').match(/^\s*interface:\s*(\S+)\s*$/m)?.[1] || null;
+}
+
+function probeIpv4Route({ address, platform = process.platform, run = execFile } = {}) {
+  if (platform !== 'darwin' || !address) {
+    return Promise.resolve({ ok: false, interface: null, error: 'unavailable' });
+  }
+  return new Promise((resolve) => {
+    run('/sbin/route', ['-n', 'get', String(address)], {
+      encoding: 'utf8',
+      timeout: 1500,
+      maxBuffer: 64 * 1024,
+    }, (error, stdout) => {
+      if (error) return resolve({ ok: false, interface: null, error: 'route_lookup_failed' });
+      const routeInterface = parseRouteInterface(stdout);
+      resolve({
+        ok: routeInterface?.startsWith('utun') || false,
+        interface: routeInterface,
+        error: routeInterface ? null : 'route_interface_missing',
+      });
+    });
+  });
 }
 
 function parseHttpStatusLine(data) {
@@ -100,6 +126,8 @@ function probeWebSocketEndpoint({
 module.exports = {
   diagnosticsAreHealthy,
   parseHttpStatusLine,
+  parseRouteInterface,
+  probeIpv4Route,
   probeTcpEndpoint,
   probeWebSocketEndpoint,
 };

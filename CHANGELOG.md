@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.8 - 2026-08-23
+
+- Added Shadowrocket `tun-included-routes` for locally configured private CIDRs,
+  preventing more-specific Wi-Fi routes from bypassing campus rules.
+- Extended the CLI-installed campus relay handshake deadline to cover
+  tunnel-side DNS and TCP setup instead of rejecting valid internal hostnames
+  after 750 milliseconds.
+- Added private-route diagnostics and module-generation regression coverage.
+
 ## 1.1.7 - 2026-08-23
 
 - Constrained the desktop grid and flex layout so the content pane scrolls at

@@ -23,8 +23,8 @@ does not terminate an engine it did not start.
 The [release page](https://github.com/Axfff/hkustgz-connect/releases/latest)
 contains:
 
-- `hkustgzconnect-1.1.7-mac-arm64.dmg` for the menu-bar app;
-- `hkustgz-connect-cli-1.1.7-macos-arm64.tar.gz` for the CLI;
+- `hkustgzconnect-1.1.8-mac-arm64.dmg` for the menu-bar app;
+- `hkustgz-connect-cli-1.1.8-macos-arm64.tar.gz` for the CLI;
 - `SHA256SUMS.txt` for verification.
 
 The current binary release supports Apple silicon Macs. Intel and other
@@ -53,7 +53,7 @@ after an app update.
 Extract the CLI archive, then run:
 
 ```bash
-cd hkustgz-connect-cli-1.1.7-macos-arm64
+cd hkustgz-connect-cli-1.1.8-macos-arm64
 ./cli/hkustgzconnect configure YOUR_CAMPUS_USERNAME
 ./cli/hkustgzconnect set-password
 ./cli/hkustgzconnect up
@@ -138,8 +138,14 @@ selected as the default. The module gives campus rules higher priority without
 making the campus node the global proxy. It also uses encrypted DNS through the
 normal proxy for ChatGPT and Codex realtime connections.
 
+The relay is independently installed by the CLI. After upgrading a release,
+run `./cli/hkustgzconnect install-fallback` from the matching CLI archive to
+update the relay binary; installing only the DMG does not replace it.
+
 The app exposes the same generated module under **Access > External
-applications** and checks the public realtime route under **Diagnostics**.
+applications**. The module installs specific TUN routes for locally configured
+private CIDRs; replace it after changing the route policy. Diagnostics checks
+both the public realtime route and whether macOS captured the private route.
 
 ## Build and test
 

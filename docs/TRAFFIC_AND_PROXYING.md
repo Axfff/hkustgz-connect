@@ -79,16 +79,17 @@ a main configuration does not install it as a module.
 
 The generated module contains no credentials or private topology from the
 repository. It adds locally configured CIDRs only when generated on the user's
-machine. Its DNS settings use proxied DoH, disable system-DNS fallback and
+machine. It also adds those CIDRs as `tun-included-routes`, ensuring macOS sends
+more-specific private routes to Shadowrocket before the campus rule is applied.
+Its DNS settings use proxied DoH, disable system-DNS fallback and
 IPv6 address racing, and hijack port 53 so native Node/Electron WebSockets do
 not receive poisoned system answers while Chromium HTTPS still appears usable.
 It also keeps the documented ChatGPT/Codex WebSocket domains on Shadowrocket's
 normal `PROXY` policy.
 
-Literal private IPs from the local policy may need Shadowrocket TUN exclusions or higher-priority
-rules so they reach the local campus node rather than the system's direct
-route. Keep the campus rules above broad `DIRECT`, proxy-group, and fake-IP
-rules.
+Regenerate and replace the enabled module after changing the local route policy;
+the existing module is static. Keep the campus rules above broad `DIRECT`,
+proxy-group, and fake-IP rules.
 
 Run `./cli/hkustgzconnect doctor-public` to compare the system/TUN path with
 Shadowrocket's explicit SOCKS path for `chatgpt.com` and `ws.chatgpt.com`.

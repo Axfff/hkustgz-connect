@@ -7,6 +7,8 @@ const test = require('node:test');
 const {
   diagnosticsAreHealthy,
   parseHttpStatusLine,
+  parseRouteInterface,
+  probeIpv4Route,
   probeTcpEndpoint,
   probeWebSocketEndpoint,
 } = require('../lib/diagnostics');
@@ -35,6 +37,22 @@ test('optional diagnostics do not make a healthy tunnel fail', () => {
     { status: 'pass', required: true },
     { status: 'fail', required: true },
   ]), false);
+});
+
+test('private route diagnostics distinguish Shadowrocket TUN from a physical interface', async () => {
+  assert.equal(parseRouteInterface('  interface: en0\n'), 'en0');
+  const throughTun = await probeIpv4Route({
+    address: '198.51.100.8',
+    platform: 'darwin',
+    run: (_file, _args, _options, callback) => callback(null, '  interface: utun7\n'),
+  });
+  const throughWifi = await probeIpv4Route({
+    address: '198.51.100.8',
+    platform: 'darwin',
+    run: (_file, _args, _options, callback) => callback(null, '  interface: en0\n'),
+  });
+  assert.deepEqual(throughTun, { ok: true, interface: 'utun7', error: null });
+  assert.deepEqual(throughWifi, { ok: false, interface: 'en0', error: null });
 });
 
 test('WebSocket diagnostics accept an authenticated or unauthenticated HTTP response', async () => {

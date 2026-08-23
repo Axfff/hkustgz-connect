@@ -23,7 +23,7 @@ const { loadTrayImage } = require('./lib/tray-icon');
 const { describePortConflict, isCampusEngineExecutable } = require('./lib/port-conflict');
 const { probeSocksConnect } = require('./lib/socks-health');
 const {
-  diagnosticsAreHealthy, probeTcpEndpoint, probeWebSocketEndpoint,
+  diagnosticsAreHealthy, probeIpv4Route, probeTcpEndpoint, probeWebSocketEndpoint,
 } = require('./lib/diagnostics');
 const { renderShadowrocketModule } = require('./lib/shadowrocket-module');
 const { deriveOperationalState } = require('./lib/presentation-state');
@@ -547,9 +547,12 @@ async function runDiagnostics() {
     emit();
 
     const port = socksPort();
+    const policy = loadPolicy();
+    const newestPrivateRoute = policy.routeIpv4Cidrs[policy.routeIpv4Cidrs.length - 1];
+    const privateRouteAddress = newestPrivateRoute?.split('/', 1)[0] || null;
     const enginePid = engine ? engine.pid : externalEnginePid;
     const engineRunning = !!enginePid;
-    const [listener, ownerPid, campus, gateway, relay, publicRealtime] = await Promise.all([
+    const [listener, ownerPid, campus, gateway, relay, privateRoute, publicRealtime] = await Promise.all([
       probeTcpEndpoint({ port, timeoutMs: 1500 }),
       listeningPid(port),
       engineRunning
@@ -562,6 +565,7 @@ async function runDiagnostics() {
         : Promise.resolve(false),
       probeTcpEndpoint({ host: GATEWAY_HOST, port: 443, timeoutMs: 3000 }),
       probeTcpEndpoint({ port: 1081, timeoutMs: 1000 }),
+      probeIpv4Route({ address: privateRouteAddress }),
       probeWebSocketEndpoint({ host: 'chatgpt.com', timeoutMs: 5000 }),
     ]);
     const listenerOwned = listener.ok && engineRunning && ownerPid === enginePid;
@@ -610,6 +614,23 @@ async function runDiagnostics() {
         label: 'Shadowrocket relay',
         status: relay.ok ? 'pass' : 'unavailable',
         detail: relay.ok ? 'Listening on 127.0.0.1:1081' : 'Not installed or not running',
+        required: false,
+      },
+      {
+        id: 'private-route',
+        label: 'Shadowrocket private route',
+        status: !relay.ok || !privateRouteAddress
+          ? 'unavailable'
+          : privateRoute.ok ? 'pass' : 'fail',
+        detail: !relay.ok
+          ? 'Relay not installed or not running'
+          : !privateRouteAddress
+            ? 'No private route configured'
+            : privateRoute.ok
+              ? `Captured by ${privateRoute.interface}`
+              : privateRoute.interface
+                ? `Still using ${privateRoute.interface}; replace the enabled Shadowrocket module`
+                : 'Could not inspect the macOS route',
         required: false,
       },
       {
