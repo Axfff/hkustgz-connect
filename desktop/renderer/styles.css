@@ -166,9 +166,8 @@ textarea.input { resize: vertical; line-height: 1.45; font-family: ui-monospace,
 .fact-dot.bad { background: var(--red); }
 
 .overview-grid { display: grid; grid-template-columns: minmax(0,1.3fr) minmax(220px,.7fr); gap: 16px; }
-.quick-access, .access-panel { padding: 14px; }
-.url-row { display: flex; gap: 8px; }
-.resource-list { margin-top: 12px; border-top: 1px solid var(--line); }
+.quick-access, .access-panel { padding: 5px 14px; }
+.resource-list { min-width: 0; }
 .resource-list.columns { display: grid; grid-template-columns: 1fr 1fr; }
 .resource-list.columns .resource-row:nth-child(odd) { border-right: 1px solid var(--line); }
 .resource-row {
@@ -194,8 +193,6 @@ textarea.input { resize: vertical; line-height: 1.45; font-family: ui-monospace,
 .app-row .count { margin-left: auto; color: var(--muted); font-size: 11px; }
 .app-empty { padding: 10px 0; color: var(--muted); }
 
-.security-label { display: inline-flex; align-items: center; gap: 5px; color: var(--green); font-size: 11px; font-weight: 650; }
-.security-label svg { width: 15px; height: 15px; }
 .tool-list { overflow: hidden; }
 .tool-row { min-height: 62px; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .tool-row:last-child { border-bottom: 0; }
@@ -256,7 +253,6 @@ textarea.input { resize: vertical; line-height: 1.45; font-family: ui-monospace,
 @media (max-width: 600px) {
   .connection-band { grid-template-columns: 1fr; }
   .connection-actions { flex-wrap: wrap; }
-  .url-row { flex-direction: column; }
   .resource-list.columns { grid-template-columns: 1fr; }
   .resource-list.columns .resource-row:nth-child(odd) { border-right: 0; }
   .setting-row, .advanced-body { grid-template-columns: 1fr; gap: 8px; }

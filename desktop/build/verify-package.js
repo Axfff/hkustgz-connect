@@ -21,10 +21,7 @@ const entries = new Set(
 const requiredEntries = [
   '/main.js',
   '/preload.js',
-  '/campus-preload.js',
   '/build/trayTemplate.png',
-  '/lib/campus-browser.js',
-  '/lib/campus-credential-vault.js',
   '/lib/diagnostics.js',
   '/lib/hpc-ssh.js',
   '/lib/shadowrocket-module.js',
@@ -35,14 +32,23 @@ const requiredEntries = [
   '/renderer/app.js',
   '/renderer/index.html',
   '/renderer/styles.css',
-  '/renderer/campus-browser.html',
-  '/renderer/campus-browser.js',
-  '/renderer/campus-browser.css',
   '/assets/campus-resources.json',
   '/assets/shadowrocket-hkustgz.module.template',
 ];
 for (const entry of requiredEntries) {
   if (!entries.has(entry)) throw new Error(`missing required packaged file: ${entry}`);
+}
+
+const removedBrowserEntries = [
+  '/campus-preload.js',
+  '/lib/campus-browser.js',
+  '/lib/campus-credential-vault.js',
+  '/renderer/campus-browser.html',
+  '/renderer/campus-browser.js',
+  '/renderer/campus-browser.css',
+];
+for (const entry of removedBrowserEntries) {
+  if (entries.has(entry)) throw new Error(`obsolete embedded browser file is packaged: ${entry}`);
 }
 
 const platformName = platform === 'win32' ? 'windows' : platform === 'darwin' ? 'darwin' : 'linux';

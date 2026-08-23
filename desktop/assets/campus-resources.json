@@ -22,5 +22,17 @@
     "name": "迎新系统",
     "description": "新生任务与入学指引",
     "url": "https://nso.hkust-gz.edu.cn/"
+  },
+  {
+    "id": "unikorn",
+    "name": "Unikorn",
+    "description": "校园 Unikorn 服务",
+    "url": "https://unikorn.hkust-gz.edu.cn/"
+  },
+  {
+    "id": "online-judge",
+    "name": "Online Judge",
+    "description": "编程练习与在线评测",
+    "url": "https://onlinejudge.hkust-gz.edu.cn/"
   }
 ]

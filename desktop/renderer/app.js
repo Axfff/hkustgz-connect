@@ -22,7 +22,6 @@ let shadowrocketModule = '';
 let hpcSsh = { supported: false, installed: false, alias: 'hkustgz-hpc' };
 let currentPage = 'overview';
 const pageScrollPositions = new Map();
-let openBusy = false;
 let settingsDirty = false;
 let durationTimer = null;
 
@@ -142,7 +141,7 @@ function restartDurationTimer() {
 }
 
 function renderResources() {
-  const markup = resources.map((resource) => `<button class="resource-row" type="button" data-campus-url="${esc(resource.url)}"><span><strong>${esc(resource.name)}</strong><span>${esc(resource.description)}</span></span>${icon('open')}</button>`).join('');
+  const markup = resources.map((resource) => `<button class="resource-row" type="button" data-resource-url="${esc(resource.url)}" title="Open ${esc(resource.name)} in the default browser"><span><strong>${esc(resource.name)}</strong><span>${esc(resource.description)}</span></span>${icon('open')}</button>`).join('');
   $('overviewResources').innerHTML = markup;
   $('accessResources').innerHTML = markup;
 }
@@ -243,23 +242,19 @@ async function restartTunnel() {
   }
 }
 
-async function openCampus(inputId, selectedUrl) {
-  if (openBusy) return;
-  openBusy = true;
-  document.querySelectorAll('.open-campus, [data-campus-url]').forEach((button) => { button.disabled = true; });
+async function openResource(button) {
   const message = currentPage === 'access' ? $('accessOpenMessage') : $('overviewOpenMessage');
   message.classList.remove('error');
-  message.textContent = runtime.connected ? 'Opening Campus Browser...' : 'Connecting, then opening Campus Browser...';
+  message.textContent = '';
+  button.disabled = true;
   try {
-    const url = selectedUrl || $(inputId)?.value || '';
-    const result = await window.api.openCampusBrowser(url);
+    const result = await window.api.openExternalCampusResource(button.dataset.resourceUrl);
     if (!result?.ok) {
       message.classList.add('error');
-      message.textContent = result?.error || 'Campus Browser could not be opened.';
-    } else message.textContent = 'Campus Browser opened.';
+      message.textContent = result?.error || 'The default browser could not be opened.';
+    }
   } finally {
-    openBusy = false;
-    document.querySelectorAll('.open-campus, [data-campus-url]').forEach((button) => { button.disabled = false; });
+    button.disabled = false;
     setTimeout(() => { message.textContent = ''; message.classList.remove('error'); }, 2600);
   }
 }
@@ -332,12 +327,10 @@ $('connectionButton').addEventListener('click', async () => {
 });
 document.querySelectorAll('.diagnostics-trigger').forEach((button) => button.addEventListener('click', runDiagnostics));
 document.querySelectorAll('.restart-trigger').forEach((button) => button.addEventListener('click', restartTunnel));
-document.querySelectorAll('.open-campus').forEach((button) => button.addEventListener('click', () => openCampus(button.dataset.urlInput)));
 document.addEventListener('click', (event) => {
-  const resource = event.target.closest('[data-campus-url]');
-  if (resource) openCampus(null, resource.dataset.campusUrl);
+  const resource = event.target.closest('[data-resource-url]');
+  if (resource) openResource(resource);
 });
-for (const inputId of ['overviewUrl', 'accessUrl']) $(inputId).addEventListener('keydown', (event) => { if (event.key === 'Enter') openCampus(inputId); });
 
 document.querySelectorAll('.copy-trigger').forEach((button) => button.addEventListener('click', async () => {
   let value = '';

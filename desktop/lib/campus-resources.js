@@ -2,10 +2,30 @@
 
 const fs = require('fs');
 const path = require('path');
-const { normalizeCampusUrl } = require('./campus-browser');
 
 const RESOURCE_FILE = path.join(__dirname, '..', 'assets', 'campus-resources.json');
 const MAX_RESOURCES = 32;
+const CAMPUS_SUFFIXES = ['hkust-gz.edu.cn', 'hkust.edu.hk'];
+
+function normalizeCampusResourceUrl(value) {
+  const parsed = new URL(String(value || '').trim());
+  const host = parsed.hostname.toLowerCase();
+  const campusOwned = CAMPUS_SUFFIXES.some((suffix) => (
+    host === suffix || host.endsWith(`.${suffix}`)
+  ));
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password ||
+      (parsed.port && parsed.port !== '443') || !campusOwned) {
+    throw new Error('Campus resource must be an HKUST HTTPS URL');
+  }
+  return parsed.href;
+}
+
+async function openCampusResource(value, openExternal) {
+  if (typeof openExternal !== 'function') throw new Error('Default browser is unavailable');
+  const url = normalizeCampusResourceUrl(value);
+  await openExternal(url);
+  return url;
+}
 
 function normalizeResource(value) {
   if (!value || typeof value !== 'object') return null;
@@ -20,7 +40,7 @@ function normalizeResource(value) {
       id,
       name,
       description,
-      url: normalizeCampusUrl(value.url),
+      url: normalizeCampusResourceUrl(value.url),
     };
   } catch {
     return null;
@@ -45,4 +65,12 @@ function loadCampusResources(file = RESOURCE_FILE) {
   }
 }
 
-module.exports = { MAX_RESOURCES, RESOURCE_FILE, loadCampusResources, normalizeResource };
+module.exports = {
+  CAMPUS_SUFFIXES,
+  MAX_RESOURCES,
+  RESOURCE_FILE,
+  loadCampusResources,
+  normalizeCampusResourceUrl,
+  normalizeResource,
+  openCampusResource,
+};

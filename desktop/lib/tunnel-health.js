@@ -1,9 +1,9 @@
 'use strict';
 
 // Recovery from a lost tunnel means killing and restarting the engine, which
-// drops every request the campus browser has in flight. A tunnel that is merely
-// congested — a page pulling dozens of subresources through one gateway session
-// — must therefore never be mistaken for a dead one:
+// drops every external-application request in flight. A tunnel that is merely
+// congested under many concurrent connections must therefore never be mistaken
+// for a dead one:
 //
 //   * the probe deadline is longer than a heavy page load, so a late answer
 //     still counts as alive;

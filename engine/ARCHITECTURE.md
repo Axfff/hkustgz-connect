@@ -18,7 +18,6 @@ editing the SOCKS frontend, desktop UI, or unrelated protocol generations.
 | `engine/proxy.rs` | Shared destination validation plus gateway/system resolver policy | Listener lifecycle or gateway protocol |
 | `engine/socks.rs` | Loopback SOCKS5 TCP CONNECT and UDP ASSOCIATE relay | HTTP parsing or gateway protocol details |
 | `bin/ec-engine.rs` | Process assembly, signals, liveness watchdog, and bounded session reconnect | Protocol encoding |
-| `desktop/lib/campus-browser.js` | Isolated browser session, proxy policy and safe navigation | Gateway authentication or packet formats |
 | `desktop/lib/tunnel-health.js` | When to probe the tunnel and how much evidence a restart requires | Probing itself, or engine lifecycle |
 
 The loopback SOCKS listener is the current shared frontend, not a permanent

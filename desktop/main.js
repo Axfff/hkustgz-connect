@@ -1,6 +1,6 @@
 'use strict';
 const {
-  app, BrowserWindow, WebContentsView, ipcMain, shell, Menu, clipboard, safeStorage, session,
+  app, BrowserWindow, ipcMain, shell, Menu, clipboard, safeStorage,
   Tray, nativeImage, dialog,
 } = require('electron');
 const path = require('path');
@@ -15,8 +15,7 @@ const { buildPac } = require('./lib/pac');
 const {
   loadNetworkPolicy, networkPoliciesEqual, normalizeNetworkPolicy, saveNetworkPolicy,
 } = require('./lib/network-policy');
-const { CampusBrowser, normalizeCampusUrl } = require('./lib/campus-browser');
-const { loadCampusResources } = require('./lib/campus-resources');
+const { loadCampusResources, openCampusResource } = require('./lib/campus-resources');
 const { ensureOwnerOnly } = require('./lib/private-file');
 const { appendLog, readLogTail, resetLog } = require('./lib/secure-log');
 const { loadTrayImage } = require('./lib/tray-icon');
@@ -33,7 +32,6 @@ const { deriveOperationalState } = require('./lib/presentation-state');
 const {
   PROBE_TIMEOUT_MS, TELEMETRY_TICK_MS, shouldProbe, shouldRecover,
 } = require('./lib/tunnel-health');
-const { CampusCredentialVault } = require('./lib/campus-credential-vault');
 
 // ---------- single instance (avoid the app fighting its own session) ----------
 // `app.quit()` does not stop the rest of this module from running, so return
@@ -51,7 +49,6 @@ const SETTINGS = path.join(DATA, 'settings.json');
 const CRED = path.join(DATA, 'cred.bin');
 const LOG = path.join(DATA, 'engine.log');
 const PAC_FILE = path.join(DATA, 'routing.pac');
-const CAMPUS_CREDENTIALS = path.join(DATA, 'campus-credentials.json');
 const SHARED_CONFIG_HOME = process.env.XDG_CONFIG_HOME || path.join(app.getPath('home'), '.config');
 const POLICY = path.join(SHARED_CONFIG_HOME, 'hkustgz-connect', 'policy.json');
 const SSH_CONFIG = path.join(app.getPath('home'), '.ssh', 'config');
@@ -63,13 +60,12 @@ const passwordSession = new PasswordSession({
   platform: process.platform,
 });
 
-for (const privateFile of [SETTINGS, CRED, LOG, PAC_FILE, CAMPUS_CREDENTIALS, POLICY]) {
+for (const privateFile of [SETTINGS, CRED, LOG, PAC_FILE, POLICY]) {
   ensureOwnerOnly(privateFile);
 }
 
 let win = null;
 let tray = null;
-let campusBrowser = null;
 let isQuitting = false;
 let closePromptOpen = false;
 let engine = null;
@@ -709,59 +705,12 @@ function refreshPacFile(settings = loadSettings()) {
 }
 function pacUrl() { return pathToFileURL(PAC_FILE).href; }
 
-function getCampusBrowser() {
-  if (!campusBrowser) {
-    const credentialVault = new CampusCredentialVault({
-      filePath: CAMPUS_CREDENTIALS,
-      safeStorage,
-      platform: process.platform,
-    });
-    campusBrowser = new CampusBrowser({
-      BrowserWindow,
-      WebContentsView,
-      session,
-      dialog,
-      credentialVault,
-      parentWindow: () => win,
-      toolbarFile: path.join(__dirname, 'renderer', 'campus-browser.html'),
-      campusPreload: path.join(__dirname, 'campus-preload.js'),
-      onError: (message) => {
-        state.lastError = message;
-        emit();
-      },
-    });
-  }
-  return campusBrowser;
-}
-
-async function connectAndOpenCampusBrowser(rawUrl) {
-  let url;
+async function openExternalCampusResource(rawUrl) {
   try {
-    url = normalizeCampusUrl(rawUrl);
-  } catch (error) {
-    state.lastError = error.message;
-    emit();
-    return { ok: false, error: error.message };
-  }
-
-  if (!state.connected || !lastHealthyAt) {
-    if (!state.connected) await connect();
-    if (!await waitForConnected()) {
-      const error = state.lastError || '连接校园网络超时，请重试或查看日志';
-      state.lastError = error;
-      emit();
-      return { ok: false, error };
-    }
-  }
-
-  try {
-    await getCampusBrowser().open(url, socksPort());
+    const url = await openCampusResource(rawUrl, (value) => shell.openExternal(value));
     return { ok: true, url };
   } catch (error) {
-    const message = `校园浏览器启动失败：${error.message}`;
-    state.lastError = message;
-    emit();
-    return { ok: false, error: message };
+    return { ok: false, error: error.message };
   }
 }
 
@@ -827,7 +776,6 @@ ipcMain.handle('save', async (_e, p) => {
     await reconnect();
     reconnected = true;
   }
-  if (campusBrowser && portChanged) await campusBrowser.configure(next.port);
   if (policyChanged && externalEnginePid) {
     const ownershipWarning = 'Network policy saved. Restart the tunnel from the interface that owns it to apply engine routes.';
     pacError = pacError ? `${pacError} ${ownershipWarning}` : ownershipWarning;
@@ -894,7 +842,7 @@ ipcMain.handle('get-logs', () => {
 });
 ipcMain.handle('open-log', () => shell.openPath(LOG));
 ipcMain.handle('copy', (_e, text) => { clipboard.writeText(String(text || '')); return { ok: true }; });
-ipcMain.handle('open-campus-browser', (_event, url) => connectAndOpenCampusBrowser(url));
+ipcMain.handle('open-external-campus-resource', (_event, url) => openExternalCampusResource(url));
 ipcMain.handle('resize', () => {});
 
 // ---------- window ----------
@@ -960,7 +908,6 @@ function updateTray() {
     },
     { label: 'Restart Tunnel', enabled: connectionActive, click: () => { void reconnect(); } },
     { label: 'Run Health Checks', click: () => { void runDiagnostics(); } },
-    { label: 'Open Campus Browser', click: () => { void connectAndOpenCampusBrowser(''); } },
     { type: 'separator' },
     {
       label: 'Launch at Login',

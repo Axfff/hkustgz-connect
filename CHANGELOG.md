@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.0 - 2026-08-23
+
+- Removed the embedded campus browser, its dedicated preload, renderer,
+  persistent session, and website credential vault.
+- Changed all reviewed campus Quick Access links to open in the operating
+  system's default browser.
+- Added Unikorn and Online Judge to Quick Access.
+- Restricted externally opened resources to credential-free HTTPS URLs under
+  reviewed HKUST domain suffixes and added package checks that reject obsolete
+  embedded-browser files.
+
 ## 1.2.0 - 2026-08-23
 
 - Added a one-action macOS HPC SSH route under **Access > External

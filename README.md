@@ -6,7 +6,7 @@ campus network through its Sangfor EasyConnect-compatible gateway.
 The project provides two interfaces over one Rust network engine:
 
 - **macOS app:** menu-bar status, connect/disconnect controls, diagnostics,
-  common campus links, and an isolated campus browser.
+  common campus links, and external-application setup.
 - **CLI:** scriptable lifecycle, status, health checks, PAC generation, and
   optional launch-at-login service.
 
@@ -23,8 +23,8 @@ does not terminate an engine it did not start.
 The [release page](https://github.com/Axfff/hkustgz-connect/releases/latest)
 contains:
 
-- `hkustgzconnect-1.1.8-mac-arm64.dmg` for the menu-bar app;
-- `hkustgz-connect-cli-1.1.8-macos-arm64.tar.gz` for the CLI;
+- `hkustgzconnect-1.3.0-mac-arm64.dmg` for the menu-bar app;
+- `hkustgz-connect-cli-1.3.0-macos-arm64.tar.gz` for the CLI;
 - `SHA256SUMS.txt` for verification.
 
 The current binary release supports Apple silicon Macs. Intel and other
@@ -40,6 +40,10 @@ The community build is ad-hoc signed, not Apple-notarized. On first launch,
 right-click the app and choose **Open** if Gatekeeper asks for confirmation.
 The app lives in the menu bar after its window closes.
 
+Quick Access links open in the macOS default browser. The app does not embed a
+second browser or change the system proxy. When off campus, configure that
+browser with the generated PAC URL or an existing Shadowrocket campus route.
+
 macOS may separately request permission to use the Keychain when the saved VPN
 password is first needed. The app requests that saved VPN password at most once
 per launch and reuses the result only in memory until it quits. Launching with
@@ -53,7 +57,7 @@ after an app update.
 Extract the CLI archive, then run:
 
 ```bash
-cd hkustgz-connect-cli-1.1.8-macos-arm64
+cd hkustgz-connect-cli-1.3.0-macos-arm64
 ./cli/hkustgzconnect configure YOUR_CAMPUS_USERNAME
 ./cli/hkustgzconnect set-password
 ./cli/hkustgzconnect up

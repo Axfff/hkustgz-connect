@@ -25,14 +25,14 @@ enabled that feature.
 | Anonymous/Web-only login | Anonymous and security-check-degraded Web access | Not implemented | Separate profile capability, disabled by default |
 | Session configuration | L3/TCP configuration and VPN DNS discovery | Supported for the active L3 profile | Preserve strict parser and version adapters |
 | Resource catalogue | Groups, Web resources, public/private folders and application resources | Resource-list parser exists; catalogue is not exposed to the desktop | Add a sanitized resource provider and UI; never log raw resource data |
-| Campus browsing | Resource page and external browser launch | Isolated in-app campus browser | Default novice path; no external browser or Clash required |
+| Campus browsing | Resource page and external browser launch | Reviewed links open in the default browser | Keep the desktop minimal; off-campus browser routing remains an explicit PAC or proxy choice |
 | Application access | TCP and UDP application traffic | TCP supported; UDP frontend exists, live service coverage incomplete | Keep UDP canary as a release gate |
 | Remote application | Remote-app launch and notices | Not implemented | Separate launcher adapter only if the school enables it |
 | Connection lifecycle | Auto login, reconnect, cancellation, timeout and passive kick | Auto-connect/reconnect supported; passive reasons are not structured | Move engine output to versioned structured events |
 | User information | Login history, server messages and announcements | Not implemented | Read-only optional providers |
 | Client lifecycle | Version mismatch, module update and client update | Public package watcher exists; no end-user updater | Signed update manifest with staged rollout and rollback |
 | Diagnostics | Environment checks, service status and logs | Safe local logs and basic telemetry | Add one-click redacted diagnostic bundle |
-| Network integration | L3 system tunnel, DNS service control, proxy checks and browser integration | Explicit SOCKS/PAC plus isolated browser | Do not copy global DNS mutation; add system integration only as a reversible, opt-in frontend |
+| Network integration | L3 system tunnel, DNS service control, proxy checks and browser integration | Explicit SOCKS/PAC with no embedded browser | Do not copy global DNS mutation; add system integration only as a reversible, opt-in frontend |
 | Multi-server profiles | Server history and server switching | Gateway is fixed by reviewed configuration | Institution-managed profiles may be added without changing protocol modules |
 | Accessibility/i18n | Chinese/English UI and ordinary-user resource pages | README bilingual; app currently Chinese | Move strings to locale files before adding more challenge screens |
 
@@ -42,23 +42,15 @@ The official package contains privileged DNS, L3, monitoring, environment
 check and browser-control components. HKUST(GZ) Connect must not copy that
 deployment model merely to claim parity.
 
-The default frontend is application-isolated:
+The default frontend is application-scoped:
 
 1. the Rust engine obtains an address and runs the userspace network stack;
 2. the desktop starts a loopback proxy;
-3. the multi-tab Campus Browser uses a dedicated Electron session whose
-   traffic goes through that proxy;
-4. the operating-system DNS, global proxy, default route and other browsers
-   remain unchanged;
-5. if the engine stops, Campus Browser fails closed instead of silently going
-   direct.
-
-Campus website credentials are a separate local-only facility. A main-frame
-HTTPS form submission may offer to save a credential, but storage requires
-explicit user confirmation. The vault is exact-origin scoped, encrypted with
-the operating-system credential provider, owner-only on disk, excluded from
-logs and diagnostics, and unavailable when Linux would fall back to
-`basic_text`.
+3. Quick Access validates reviewed campus HTTPS links, then asks the operating
+   system to open them in the default browser;
+4. the operating-system DNS, global proxy and default route remain unchanged;
+5. off-campus browser routing is enabled only when the user explicitly applies
+   the generated PAC URL or a compatible proxy rule.
 
 An optional system-wide mode is acceptable only if it snapshots the exact
 pre-connection state, writes changes transactionally, restores them on normal
@@ -80,7 +72,7 @@ Desktop
        -> TransportAdapter
           legacy | modern | future-version
        -> Frontend
-          campus_browser | socks | pac | optional_managed_system
+          external_links | socks | pac | optional_managed_system
 ```
 
 The control protocol must represent, without UI-specific fields:

@@ -16,7 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   sshConfig: () => ipcRenderer.invoke('ssh-config'),
   shadowrocketModule: () => ipcRenderer.invoke('shadowrocket-module'),
   copy: (text) => ipcRenderer.invoke('copy', text),
-  openCampusBrowser: (url) => ipcRenderer.invoke('open-campus-browser', url),
+  openExternalCampusResource: (url) => ipcRenderer.invoke('open-external-campus-resource', url),
   resize: (height) => ipcRenderer.invoke('resize', height),
   onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),
   onTelemetry: (cb) => ipcRenderer.on('telemetry', (_e, t) => cb(t)),

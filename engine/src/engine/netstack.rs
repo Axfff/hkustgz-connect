@@ -49,7 +49,7 @@ impl VirtualNetstack {
         // the tunnel waits out the poll interval before the stack processes it —
         // measured at ~4.6ms per round trip with a 2ms interval against ~0.09ms
         // here (see tests/poll_latency_probe.rs). That delay applies to every
-        // round trip of every connection the campus browser makes.
+        // round trip of every connection a proxy client makes.
         let runner = stack.spawn_tokio();
         channel
             .set_ips_blocking([IpAddr::V4(assigned_address)])
