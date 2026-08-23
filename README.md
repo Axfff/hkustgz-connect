@@ -23,8 +23,8 @@ does not terminate an engine it did not start.
 The [release page](https://github.com/Axfff/hkustgz-connect/releases/latest)
 contains:
 
-- `hkustgzconnect-1.1.6-mac-arm64.dmg` for the menu-bar app;
-- `hkustgz-connect-cli-1.1.6-macos-arm64.tar.gz` for the CLI;
+- `hkustgzconnect-1.1.7-mac-arm64.dmg` for the menu-bar app;
+- `hkustgz-connect-cli-1.1.7-macos-arm64.tar.gz` for the CLI;
 - `SHA256SUMS.txt` for verification.
 
 The current binary release supports Apple silicon Macs. Intel and other
@@ -53,7 +53,7 @@ after an app update.
 Extract the CLI archive, then run:
 
 ```bash
-cd hkustgz-connect-cli-1.1.6-macos-arm64
+cd hkustgz-connect-cli-1.1.7-macos-arm64
 ./cli/hkustgzconnect configure YOUR_CAMPUS_USERNAME
 ./cli/hkustgzconnect set-password
 ./cli/hkustgzconnect up

@@ -20,6 +20,7 @@ let pacUrl = '';
 let sshConfig = '';
 let shadowrocketModule = '';
 let currentPage = 'overview';
+const pageScrollPositions = new Map();
 let openBusy = false;
 let settingsDirty = false;
 let durationTimer = null;
@@ -45,6 +46,8 @@ function relativeTime(timestamp) {
 }
 
 function setPage(page) {
+  const scroller = document.querySelector('.page-scroll');
+  if (scroller) pageScrollPositions.set(currentPage, scroller.scrollTop);
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach((button) => {
     const active = button.dataset.page === page;
@@ -60,6 +63,7 @@ function setPage(page) {
   $('pageTitle').textContent = {
     overview: 'Overview', access: 'Access', diagnostics: 'Diagnostics', settings: 'Settings',
   }[page];
+  if (scroller) scroller.scrollTop = pageScrollPositions.get(page) || 0;
   if (page === 'diagnostics') loadLogs();
 }
 

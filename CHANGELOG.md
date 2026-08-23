@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.7 - 2026-08-23
+
+- Constrained the desktop grid and flex layout so the content pane scrolls at
+  compact window sizes while the header and sidebar remain fixed.
+- Preserved an independent scroll position for each application page.
+- Added renderer regression coverage for the window scrolling contract.
+
 ## 1.1.6 - 2026-08-23
 
 - Added an optional ChatGPT/Codex HTTPS-WebSocket route check to desktop
