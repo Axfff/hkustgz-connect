@@ -129,20 +129,39 @@
             </div>
           </section>
           <section class="section">
-            <div class="section-heading"><h2>External applications</h2></div>
+            <div class="section-heading"><h2>Application access</h2></div>
             <div class="tool-list">
               <div id="hpcSshRow" class="tool-row"><div><strong>HPC SSH</strong><code id="hpcSshStatus">Checking...</code></div><button id="hpcSshButton" class="button secondary" type="button"><svg><use href="#i-terminal"></use></svg><span>Install</span></button></div>
               <div class="tool-row"><div><strong>SOCKS5 endpoint</strong><code id="socksEndpoint">127.0.0.1:1080</code></div><button class="icon-button copy-trigger" type="button" data-copy="socks" aria-label="Copy SOCKS5 endpoint" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
-              <div class="tool-row"><div><strong>PAC URL</strong><code id="pacEndpoint">-</code></div><button class="icon-button copy-trigger" type="button" data-copy="pac" aria-label="Copy PAC URL" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
               <div class="tool-row"><div><strong>SSH ProxyCommand</strong><code id="sshEndpoint">Load the generated snippet</code></div><button class="icon-button copy-trigger" type="button" data-copy="ssh" aria-label="Copy SSH ProxyCommand" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
-              <div class="tool-row"><div><strong>Shadowrocket module</strong><code>Secure DNS + campus rules</code></div><button class="icon-button copy-trigger" type="button" data-copy="shadowrocket" aria-label="Copy Shadowrocket module" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
+            </div>
+          </section>
+          <section class="section">
+            <div class="section-heading"><div><h2>Network compatibility</h2><p class="section-note">Your existing proxy or overlay remains the policy owner.</p></div></div>
+            <div class="integration-list panel">
+              <div class="integration-row">
+                <div><strong>Browser / PAC</strong><span>Campus destinations use the local path; other traffic stays outside this app.</span></div>
+                <div class="integration-actions"><button class="button secondary copy-trigger" type="button" data-copy="pac"><svg><use href="#i-copy"></use></svg>Copy PAC</button><button class="icon-button guide-trigger" type="button" data-guide="browser" aria-label="Open browser and PAC guide" title="Open guide"><svg><use href="#i-open"></use></svg></button></div>
+              </div>
+              <div class="integration-row">
+                <div><strong>Shadowrocket</strong><span id="fallbackServiceStatus">Checking compatibility relay...</span></div>
+                <div class="integration-actions wrap"><select id="shadowrocketPreset" class="input integration-select" aria-label="Shadowrocket module preset"><option value="campus">Campus only</option><option value="repair">Realtime/DNS repair</option></select><button id="fallbackServiceButton" class="button secondary" type="button"><span>Prepare</span></button><button id="fallbackRemoveButton" class="button secondary" type="button" hidden>Remove</button><button class="icon-button copy-trigger" type="button" data-copy="shadowrocket" aria-label="Copy selected Shadowrocket module" title="Copy module"><svg><use href="#i-copy"></use></svg></button><button class="icon-button guide-trigger" type="button" data-guide="shadowrocket" aria-label="Open Shadowrocket guide" title="Open guide"><svg><use href="#i-open"></use></svg></button></div>
+              </div>
+              <div class="integration-row">
+                <div><strong>Clash / Mihomo</strong><span>Merge one local SOCKS node and ordered campus rules; keep MATCH unchanged.</span></div>
+                <div class="integration-actions"><button class="button secondary copy-trigger" type="button" data-copy="mihomo"><svg><use href="#i-copy"></use></svg>Copy snippet</button><button class="icon-button guide-trigger" type="button" data-guide="mihomo" aria-label="Open Clash and Mihomo guide" title="Open guide"><svg><use href="#i-open"></use></svg></button></div>
+              </div>
+              <div class="integration-row">
+                <div><strong>Tailscale</strong><span>Tailnet routes and MagicDNS stay untouched unless another TUN rule overlaps them.</span></div>
+                <div class="integration-actions"><button class="button secondary guide-trigger" type="button" data-guide="tailscale"><svg><use href="#i-open"></use></svg>Open guide</button></div>
+              </div>
             </div>
             <p id="copyMessage" class="form-message" role="status"></p>
           </section>
         </section>
 
         <section class="page" data-page-panel="diagnostics" hidden>
-          <p class="page-intro">Checks distinguish the local process, campus data path, gateway, Shadowrocket relay, and public realtime route.</p>
+          <p class="page-intro">Checks distinguish the local process, campus path, compatibility relay, private-route visibility, and system/TUN Internet path.</p>
           <section class="section first">
             <div class="section-heading"><div><h2>Health checks</h2><p id="diagnosticsMeta" class="section-note">Not run in this session</p></div><button id="runDiagnosticsButton" class="button secondary diagnostics-trigger" type="button"><svg><use href="#i-stethoscope"></use></svg>Run checks</button></div>
             <div id="diagnosticsList" class="diagnostics-list panel"></div>
@@ -181,10 +200,10 @@
               <h2>Network endpoint</h2>
               <label class="setting-row"><span>Bind address<small>Loopback-only by design.</small></span><input class="input compact" value="127.0.0.1" disabled></label>
               <label class="setting-row"><span>SOCKS port<small>Changing this reconnects the tunnel and regenerates PAC.</small></span><input id="settingsPort" class="input compact" type="number" min="1025" max="65535"></label>
+              <label class="setting-row"><span>Primary proxy SOCKS port<small>Used by the optional compatibility relay; Shadowrocket defaults to 1082.</small></span><input id="primaryProxyPort" class="input compact" type="number" min="1025" max="65535"></label>
             </section>
             <details class="settings-group advanced-settings">
               <summary>Advanced route policy</summary>
-              <label class="advanced-body" for="routeDomains"><span>Authorized domain suffixes<small>One reviewed university-owned suffix per line.</small></span><textarea id="routeDomains" class="input" rows="5" spellcheck="false"></textarea></label>
               <label class="advanced-body" for="routeIpv4Cidrs"><span>Private IPv4 routes<small>Local-only values supplied through an approved campus source, one CIDR per line.</small></span><textarea id="routeIpv4Cidrs" class="input" rows="4" spellcheck="false" placeholder="No private routes configured"></textarea></label>
               <label class="advanced-body" for="vpnDnsServers"><span>VPN DNS servers<small>Local-only addresses, one IPv4 address per line.</small></span><textarea id="vpnDnsServers" class="input" rows="3" spellcheck="false" placeholder="No VPN DNS servers configured"></textarea></label>
             </details>

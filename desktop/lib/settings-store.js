@@ -3,10 +3,11 @@
 const fs = require('fs');
 const path = require('path');
 const { ensureOwnerOnly } = require('./private-file');
-const { DEFAULT_ROUTE_DOMAINS, normalizeRouteDomains } = require('./pac');
+const { DEFAULT_ROUTE_DOMAINS } = require('./pac');
 
 const DEFAULTS = Object.freeze({
   port: 1080,
+  primaryProxyPort: 1082,
   username: '',
   autoReconnect: true,
   maxAttempts: 3,
@@ -22,10 +23,14 @@ function isValidPort(port) {
 
 function normalizeSettings(saved = {}) {
   const port = Number(saved.port);
+  const primaryProxyPort = Number(saved.primaryProxyPort);
   const maxAttempts = Number(saved.maxAttempts);
   return {
     username: typeof saved.username === 'string' ? saved.username : DEFAULTS.username,
     port: isValidPort(port) ? port : DEFAULTS.port,
+    primaryProxyPort: isValidPort(primaryProxyPort)
+      ? primaryProxyPort
+      : DEFAULTS.primaryProxyPort,
     autoReconnect: saved.autoReconnect !== false,
     maxAttempts: Number.isInteger(maxAttempts)
       ? Math.max(0, Math.min(10, maxAttempts))
@@ -35,7 +40,7 @@ function normalizeSettings(saved = {}) {
     closeAction: ['ask', 'minimize', 'quit'].includes(saved.closeAction)
       ? saved.closeAction
       : DEFAULTS.closeAction,
-    routeDomains: normalizeRouteDomains(saved.routeDomains),
+    routeDomains: [...DEFAULT_ROUTE_DOMAINS],
   };
 }
 

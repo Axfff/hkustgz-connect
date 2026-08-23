@@ -2,7 +2,9 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { describePortConflict, isCampusEngineExecutable } = require('../lib/port-conflict');
+const {
+  describePortConflict, isCampusEngineExecutable, isFallbackRelayExecutable,
+} = require('../lib/port-conflict');
 
 test('a healthy CLI engine is recognized as a shared tunnel', () => {
   const message = describePortConflict({
@@ -19,6 +21,12 @@ test('packaged and source engine names are recognized', () => {
   assert.equal(isCampusEngineExecutable('/tmp/ec-engine'), true);
   assert.equal(isCampusEngineExecutable('/tmp/ec-engine-darwin-arm64'), true);
   assert.equal(isCampusEngineExecutable('/tmp/not-the-engine'), false);
+});
+
+test('only the compatibility relay executable is recognized on its listener', () => {
+  assert.equal(isFallbackRelayExecutable('/home/example/bin/ec-fallback'), true);
+  assert.equal(isFallbackRelayExecutable('/tmp/ec-fallback-darwin-arm64'), true);
+  assert.equal(isFallbackRelayExecutable('/Applications/Other Proxy.app/proxy'), false);
 });
 
 test('an unrelated listener is not described as a campus engine', () => {

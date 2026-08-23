@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.4.0 - 2026-08-24
+
+- Added a dedicated **Network compatibility** surface for PAC, Shadowrocket,
+  Clash/Mihomo, and Tailscale guidance while keeping the existing network
+  service as the primary policy owner.
+- Changed the default Shadowrocket export to a campus-only preset that
+  preserves existing DNS and IPv6 policy, and moved global changes into a
+  separate opt-in **Realtime/DNS repair** preset.
+- Bundled user-level setup and removal of the TCP-only Shadowrocket
+  compatibility relay in the macOS app, with a configurable primary-proxy SOCKS
+  port and no administrator service.
+- Added a Clash/Mihomo merge snippet with engine/gateway loop guards and ordered
+  campus UDP rejection, without rewriting subscriptions, DNS, proxy groups, or
+  the final policy.
+- Added private-route visibility diagnostics and practical coexistence
+  tutorials for multi-proxy and Tailscale setups, with explicit limits for
+  overlapping TUN routes and incomplete live UDP coverage.
+- Reported system/TUN and explicit primary SOCKS HTTPS reachability separately
+  for both public application hosts, with hard deadlines and without treating
+  an HTTP response as proof of a persistent WebSocket or application stream.
+- Verified relay readiness by LaunchAgent ownership and a campus SOCKS request,
+  serialized app/CLI relay changes with an owner-only interprocess lock, made
+  updates transactional, and added renderer DOM/IPC contracts after fixing a
+  removed-field startup crash.
+- Documented the scoped-routing and compatibility tradeoffs against the
+  reviewed EasyConnect client instead of claiming universal conflict-free or
+  protocol parity.
+
 ## 1.3.0 - 2026-08-23
 
 - Removed the embedded campus browser, its dedicated preload, renderer,
@@ -49,8 +77,8 @@
 
 ## 1.1.6 - 2026-08-23
 
-- Added an optional ChatGPT/Codex HTTPS-WebSocket route check to desktop
-  diagnostics and a matching `doctor-public` CLI command.
+- Added an optional ChatGPT/Codex WebSocket-shaped HTTPS reachability check to
+  desktop diagnostics and a matching `doctor-public` CLI command.
 - Added a generated Shadowrocket module that keeps OpenAI realtime traffic on
   the normal proxy, covers the current OpenAI desktop/authentication dependency
   list, uses proxied encrypted DNS, disables the failing IPv6 fallback, and

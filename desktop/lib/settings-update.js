@@ -1,7 +1,6 @@
 'use strict';
 
 const { isValidPort, normalizeSettings } = require('./settings-store');
-const { normalizeRouteDomains } = require('./pac');
 
 // The engine reads the account on one stdin line and the password on the next.
 // A control character in either value would reframe that exchange, so it is
@@ -37,6 +36,7 @@ function applySettingsPatch(previous, payload) {
   }
   if (source.password != null) parseCredentialField(source.password, '密码');
   if (source.port != null) next.port = parsePort(source.port);
+  if (source.primaryProxyPort != null) next.primaryProxyPort = parsePort(source.primaryProxyPort);
   if (source.maxAttempts != null) {
     const attempts = Number(source.maxAttempts);
     if (!Number.isInteger(attempts) || attempts < 0 || attempts > 10) {
@@ -44,7 +44,6 @@ function applySettingsPatch(previous, payload) {
     }
     next.maxAttempts = attempts;
   }
-  if (source.routeDomains != null) next.routeDomains = normalizeRouteDomains(source.routeDomains);
   if (source.closeAction != null) {
     if (!['ask', 'minimize', 'quit'].includes(source.closeAction)) {
       throw new Error('关闭窗口行为无效');
@@ -57,10 +56,11 @@ function applySettingsPatch(previous, payload) {
       next[key] = source[key];
     }
   }
-
   return {
     settings: normalizeSettings(next),
     portChanged: next.port !== normalizeSettings(previous).port,
+    primaryProxyPortChanged:
+      next.primaryProxyPort !== normalizeSettings(previous).primaryProxyPort,
   };
 }
 

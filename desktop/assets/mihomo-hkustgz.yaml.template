@@ -1,0 +1,19 @@
+# HKUST(GZ) Connect - Mihomo / Clash merge snippet
+# Merge the proxy entry into `proxies`, then insert the generated rules before
+# broad DIRECT or MATCH rules. Keep your existing primary proxy policy.
+
+proxies:
+  - name: HKUSTGZ
+    type: socks5
+    server: 127.0.0.1
+    port: __SOCKS_PORT__
+    udp: false
+
+rules:
+  - PROCESS-NAME,ec-engine,DIRECT
+  - PROCESS-NAME,ec-engine-darwin-arm64,DIRECT
+  - PROCESS-NAME,ec-engine-darwin-amd64,DIRECT
+__UDP_REJECT_RULES__
+  - DOMAIN,remote.hkust-gz.edu.cn,DIRECT
+__ROUTE_DOMAIN_RULES__
+__ROUTE_IPV4_RULES__

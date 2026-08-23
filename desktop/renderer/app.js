@@ -18,8 +18,10 @@ let telemetry = { connCount: 0, apps: [], latencyMs: null };
 let resources = [];
 let pacUrl = '';
 let sshConfig = '';
-let shadowrocketModule = '';
 let hpcSsh = { supported: false, installed: false, alias: 'hkustgz-hpc' };
+let fallbackService = {
+  supported: false, installed: false, running: false, conflict: false, port: 1081,
+};
 let currentPage = 'overview';
 const pageScrollPositions = new Map();
 let settingsDirty = false;
@@ -159,6 +161,38 @@ function renderHpcSsh(next = {}) {
   button.title = hpcSsh.installed ? 'Remove managed HPC SSH route' : 'Install managed HPC SSH route';
 }
 
+function renderFallbackService(next = {}) {
+  fallbackService = {
+    supported: false,
+    installed: false,
+    running: false,
+    conflict: false,
+    needsUpdate: false,
+    port: 1081,
+    ...next,
+  };
+  const button = $('fallbackServiceButton');
+  if (!fallbackService.supported) {
+    $('fallbackServiceStatus').textContent = 'One-click relay setup is available on macOS.';
+    button.hidden = true;
+    $('fallbackRemoveButton').hidden = true;
+    return;
+  }
+  button.hidden = false;
+  $('fallbackRemoveButton').hidden = !fallbackService.installed;
+  $('fallbackServiceStatus').textContent = fallbackService.needsUpdate
+    ? 'Installed relay uses previous ports; update it before reconnecting.'
+    : fallbackService.running
+      ? `Running on 127.0.0.1:${fallbackService.port || 1081}; primary proxy stays in control.`
+      : fallbackService.conflict
+        ? `Port ${fallbackService.port || 1081} is owned by ${fallbackService.ownerName || 'another process'}.`
+        : fallbackService.installed
+          ? 'Installed, but the relay listener is not running.'
+          : 'Prepare the user-level relay, then copy the selected module.';
+  button.querySelector('span').textContent = fallbackService.installed ? 'Update' : 'Prepare';
+  button.title = 'Install or update the user-level compatibility relay';
+}
+
 function renderDiagnostics(diagnostics = {}) {
   const running = !!diagnostics.running;
   const checks = Array.isArray(diagnostics.checks) ? diagnostics.checks : [];
@@ -192,7 +226,7 @@ function populateSettings() {
   $('maxAttempts').disabled = settings.autoReconnect === false;
   $('closeAction').value = ['ask', 'minimize', 'quit'].includes(settings.closeAction) ? settings.closeAction : 'minimize';
   $('settingsPort').value = settings.port || 1080;
-  $('routeDomains').value = (settings.routeDomains || []).join('\n');
+  $('primaryProxyPort').value = settings.primaryProxyPort || 1082;
   $('routeIpv4Cidrs').value = (settings.routeIpv4Cidrs || []).join('\n');
   $('vpnDnsServers').value = (settings.vpnDnsServers || []).join('\n');
   settingsDirty = false;
@@ -209,10 +243,10 @@ async function refreshState({ preserveSettings = false } = {}) {
   renderResources();
   $('socksFact').textContent = `127.0.0.1:${Number(settings.port) || 1080}`;
   $('socksEndpoint').textContent = `127.0.0.1:${Number(settings.port) || 1080}`;
-  $('pacEndpoint').textContent = pacUrl || '-';
   $('sidebarAccount').textContent = settings.username || '-';
   $('sidebarVersion').textContent = next.version ? `Version ${next.version}` : '-';
   renderHpcSsh(next.hpcSsh);
+  renderFallbackService(next.fallbackService);
   $('loginUsername').value = settings.username || '';
   if (!preserveSettings || !settingsDirty) populateSettings();
   showAuthenticated(next.loggedIn);
@@ -268,18 +302,23 @@ async function loadLogs() {
 async function saveSettings(event) {
   event.preventDefault();
   const port = Number($('settingsPort').value);
+  const primaryProxyPort = Number($('primaryProxyPort').value);
   const maxAttempts = Number($('maxAttempts').value);
   if (!Number.isInteger(port) || port < 1025 || port > 65535) return showSettingsMessage('SOCKS port must be an integer from 1025 to 65535.', true);
+  if (!Number.isInteger(primaryProxyPort) || primaryProxyPort < 1025 || primaryProxyPort > 65535) return showSettingsMessage('Primary proxy port must be an integer from 1025 to 65535.', true);
+  const relayPortsChanged = port !== Number(settings.port)
+    || primaryProxyPort !== Number(settings.primaryProxyPort);
+  if (fallbackService.installed && relayPortsChanged && new Set([port, 1081, primaryProxyPort]).size !== 3) return showSettingsMessage('Campus, relay, and primary proxy ports must be different while the compatibility relay is prepared.', true);
   if (!Number.isInteger(maxAttempts) || maxAttempts < 0 || maxAttempts > 10) return showSettingsMessage('Retry limit must be an integer from 0 to 10.', true);
   const payload = {
     username: $('settingsUsername').value.trim(),
     port,
+    primaryProxyPort,
     startAtLogin: $('startAtLogin').checked,
     autoConnect: $('autoConnect').checked,
     autoReconnect: $('autoReconnect').checked,
     maxAttempts,
     closeAction: $('closeAction').value,
-    routeDomains: $('routeDomains').value,
     routeIpv4Cidrs: $('routeIpv4Cidrs').value,
     vpnDnsServers: $('vpnDnsServers').value,
   };
@@ -338,8 +377,11 @@ document.querySelectorAll('.copy-trigger').forEach((button) => button.addEventLi
   if (button.dataset.copy === 'pac') value = pacUrl;
   if (button.dataset.copy === 'ssh') value = sshConfig || await window.api.sshConfig();
   if (button.dataset.copy === 'shadowrocket') {
-    value = shadowrocketModule || await window.api.shadowrocketModule();
-    shadowrocketModule = value;
+    const preset = $('shadowrocketPreset').value === 'repair' ? 'repair' : 'campus';
+    value = await window.api.shadowrocketModule(preset);
+  }
+  if (button.dataset.copy === 'mihomo') {
+    value = await window.api.mihomoProfile();
   }
   if (!value) return;
   await window.api.copy(value);
@@ -347,6 +389,47 @@ document.querySelectorAll('.copy-trigger').forEach((button) => button.addEventLi
   $('copyMessage').textContent = 'Copied.';
   setTimeout(() => { $('copyMessage').textContent = ''; }, 1200);
 }));
+
+document.querySelectorAll('.guide-trigger').forEach((button) => button.addEventListener('click', async () => {
+  const result = await window.api.openNetworkGuide(button.dataset.guide);
+  if (!result?.ok) {
+    $('copyMessage').classList.add('error');
+    $('copyMessage').textContent = result?.error || 'The guide could not be opened.';
+  }
+}));
+
+function setFallbackServiceBusy(busy) {
+  $('fallbackServiceButton').disabled = busy;
+  $('fallbackRemoveButton').disabled = busy;
+}
+
+$('fallbackServiceButton').addEventListener('click', async () => {
+  setFallbackServiceBusy(true);
+  try {
+    const result = await window.api.installFallbackService();
+    renderFallbackService(result?.state);
+    $('copyMessage').classList.toggle('error', !result?.ok);
+    $('copyMessage').textContent = result?.ok
+      ? 'Compatibility relay prepared.'
+      : result?.error || 'The compatibility relay could not be changed.';
+  } finally {
+    setFallbackServiceBusy(false);
+  }
+});
+
+$('fallbackRemoveButton').addEventListener('click', async () => {
+  setFallbackServiceBusy(true);
+  try {
+    const result = await window.api.removeFallbackService();
+    renderFallbackService(result?.state);
+    $('copyMessage').classList.toggle('error', !result?.ok);
+    $('copyMessage').textContent = result?.ok
+      ? 'Compatibility relay removed.'
+      : result?.error || 'The compatibility relay could not be removed.';
+  } finally {
+    setFallbackServiceBusy(false);
+  }
+});
 
 $('hpcSshButton').addEventListener('click', async () => {
   const button = $('hpcSshButton');
@@ -371,7 +454,7 @@ $('revealLog').addEventListener('click', () => window.api.openLog());
 $('settingsForm').addEventListener('submit', saveSettings);
 $('discardSettings').addEventListener('click', () => { populateSettings(); showSettingsMessage('Changes discarded.'); });
 $('autoReconnect').addEventListener('change', () => { $('maxAttempts').disabled = !$('autoReconnect').checked; settingsDirty = true; });
-for (const id of ['settingsUsername', 'settingsPassword', 'startAtLogin', 'autoConnect', 'maxAttempts', 'closeAction', 'settingsPort', 'routeDomains', 'routeIpv4Cidrs', 'vpnDnsServers']) {
+for (const id of ['settingsUsername', 'settingsPassword', 'startAtLogin', 'autoConnect', 'maxAttempts', 'closeAction', 'settingsPort', 'primaryProxyPort', 'routeIpv4Cidrs', 'vpnDnsServers']) {
   $(id).addEventListener('input', () => { settingsDirty = true; });
   $(id).addEventListener('change', () => { settingsDirty = true; });
 }

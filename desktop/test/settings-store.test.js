@@ -13,17 +13,20 @@ test('settings normalization drops obsolete keys and bounds values', () => {
     normalizeSettings({
       username: 'test-user',
       port: '2080',
+      primaryProxyPort: '3082',
       maxAttempts: 99,
       autoReconnect: false,
       startAtLogin: true,
       autoConnect: false,
       closeAction: 'minimize',
+      routeDomains: ['example.com'],
       server: 'untrusted.example',
       customDns: '1.2.3.4',
     }),
     {
       username: 'test-user',
       port: 2080,
+      primaryProxyPort: 3082,
       maxAttempts: 10,
       autoReconnect: false,
       startAtLogin: true,
@@ -37,6 +40,7 @@ test('settings normalization drops obsolete keys and bounds values', () => {
 test('invalid ports and retry counts use reviewed defaults', () => {
   const settings = normalizeSettings({ port: 80, maxAttempts: 1.5 });
   assert.equal(settings.port, 1080);
+  assert.equal(settings.primaryProxyPort, 1082);
   assert.equal(settings.maxAttempts, 3);
   assert.equal(settings.closeAction, 'minimize');
 });

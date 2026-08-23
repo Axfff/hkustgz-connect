@@ -1,12 +1,14 @@
 # HKUST(GZ) Connect
 
-An unofficial, open-source client for authorized access to the HKUST(GZ)
-campus network through its Sangfor EasyConnect-compatible gateway.
+An unofficial, open-source, application-scoped client for authorized access to
+the HKUST(GZ) campus network through its Sangfor EasyConnect-compatible
+gateway. It is designed to add a campus path while a primary proxy, Tailscale,
+or ordinary network connection keeps control of everything else.
 
 The project provides two interfaces over one Rust network engine:
 
 - **macOS app:** menu-bar status, connect/disconnect controls, diagnostics,
-  common campus links, and external-application setup.
+  common campus links, and guided Shadowrocket, Mihomo, PAC, and SSH setup.
 - **CLI:** scriptable lifecycle, status, health checks, PAC generation, and
   optional launch-at-login service.
 
@@ -14,6 +16,11 @@ You may install either interface or both. When one interface already owns a
 healthy engine on `127.0.0.1:1080`, the other attaches to that engine instead
 of starting a second session. Disconnecting or quitting an attached interface
 does not terminate an engine it did not start.
+
+The engine binds to loopback and does not replace the default route, system
+DNS, or system proxy by default. This reduces collisions with other network
+services, but it cannot guarantee compatibility when two TUNs claim the same
+route or DNS policy. See [Network coexistence](docs/NETWORK_COEXISTENCE.md).
 
 > This is a community project, not an official HKUST or HKUST(GZ) product.
 > Use it only with an account and resources you are authorized to access.
@@ -23,8 +30,8 @@ does not terminate an engine it did not start.
 The [release page](https://github.com/Axfff/hkustgz-connect/releases/latest)
 contains:
 
-- `hkustgzconnect-1.3.0-mac-arm64.dmg` for the menu-bar app;
-- `hkustgz-connect-cli-1.3.0-macos-arm64.tar.gz` for the CLI;
+- `hkustgzconnect-1.4.0-mac-arm64.dmg` for the menu-bar app;
+- `hkustgz-connect-cli-1.4.0-macos-arm64.tar.gz` for the CLI;
 - `SHA256SUMS.txt` for verification.
 
 The current binary release supports Apple silicon Macs. Intel and other
@@ -57,7 +64,7 @@ after an app update.
 Extract the CLI archive, then run:
 
 ```bash
-cd hkustgz-connect-cli-1.3.0-macos-arm64
+cd hkustgz-connect-cli-1.4.0-macos-arm64
 ./cli/hkustgzconnect configure YOUR_CAMPUS_USERNAME
 ./cli/hkustgzconnect set-password
 ./cli/hkustgzconnect up
@@ -95,6 +102,9 @@ before attaching:
 
 `down` stops only the PID recorded by this CLI. Quitting the app stops only its
 own child process. This prevents one interface from terminating the other.
+The app also refuses to change the campus SOCKS port while attached to an
+engine owned by another interface; stop that engine from its owner before
+changing the shared endpoint.
 
 For predictable launch-at-login behavior, enable it in one interface. If CLI
 autostart starts first, the app will attach when it opens.
@@ -104,8 +114,8 @@ autostart starts first, the app will attach when it opens.
 The local SOCKS5 endpoint is `127.0.0.1:1080`. It admits only the public campus
 domains plus any network ranges in the user's local policy.
 
-On macOS, the common HPC login has a managed setup under **Access > External
-applications > HPC SSH**. Choose **Install** once, then use either:
+On macOS, the common HPC login has a managed setup under **Access > Application
+access > HPC SSH**. Choose **Install** once, then use either:
 
 ```bash
 ssh YOUR_HPC_USERNAME@hkustgz-hpc
@@ -137,34 +147,54 @@ For browsers and tools that support PAC files:
 ./cli/hkustgzconnect pac
 ```
 
-See [Traffic and proxying](docs/TRAFFIC_AND_PROXYING.md) for Shadowrocket and
-literal private-IP routing.
+The generated PAC replaces another browser-level PAC or explicit proxy; it does
+not compose those policies automatically. Prefer the primary client's TUN mode
+or merge PAC rules manually when the browser itself already owns proxy policy.
 
-### Shadowrocket coexistence
+See [Network coexistence](docs/NETWORK_COEXISTENCE.md) for browser, Shadowrocket,
+Clash/Mihomo, and Tailscale setup, and [Traffic and
+proxying](docs/TRAFFIC_AND_PROXYING.md) for the underlying route boundaries.
 
-Install the loopback relay and generate the compatibility module:
+### Coexistence with a primary proxy
+
+The app exposes integrations under **Access > Network compatibility**. Keep
+Shadowrocket or Clash/Mihomo in charge of normal Internet traffic and route
+only reviewed campus destinations to HKUST(GZ) Connect.
+
+For Shadowrocket, select **Prepare**, create a local SOCKS5 node named
+`HKUSTGZ` at `127.0.0.1:1081`, and copy the default **Campus only** module into
+**Config > Modules > New Module**. Leave the normal Internet-capable node or
+policy group selected as the default. The campus-only preset preserves the
+existing DNS and IPv6 policy and rejects unsupported campus UDP before it can
+fall through to another route.
+
+The **Realtime/DNS repair** preset is opt-in and replaces the campus-only
+module; keep exactly one `HKUST(GZ) Connect` module enabled. It changes
+Shadowrocket DNS/IPv6 behavior and pins reviewed OpenAI domains to the primary
+proxy. Consider it only when diagnostics report failed system/TUN HTTPS
+reachability and successful explicit primary SOCKS HTTPS reachability. After
+installing it, verify the persistent connection in the affected application;
+the diagnostic requests to `chatgpt.com` and `ws.chatgpt.com` do not prove a
+working WebSocket or stream.
+CLI users have matching commands:
 
 ```bash
 ./cli/hkustgzconnect install-fallback
 ./cli/hkustgzconnect shadowrocket-module
 ./cli/hkustgzconnect doctor-public
+./cli/hkustgzconnect shadowrocket-repair-module
 ```
 
-Create a Shadowrocket SOCKS5 node named `HKUSTGZ` at `127.0.0.1:1081`. Then
-open **Config > Modules > New Module**, paste the generated file's contents,
-save it, and enable `HKUST(GZ) Connect`. Leave a normal Internet-capable node
-selected as the default. The module gives campus rules higher priority without
-making the campus node the global proxy. It also uses encrypted DNS through the
-normal proxy for ChatGPT and Codex realtime connections.
+CLI relay and diagnostic commands reuse the installed relay port or desktop
+setting when present. Set `HKUSTGZ_PRIMARY_PROXY_PORT=PORT` for an explicit
+one-command override; each command prints the endpoint and its source.
 
-The relay is independently installed by the CLI. After upgrading a release,
-run `./cli/hkustgzconnect install-fallback` from the matching CLI archive to
-update the relay binary; installing only the DMG does not replace it.
-
-The app exposes the same generated module under **Access > External
-applications**. The module installs specific TUN routes for locally configured
-private CIDRs; replace it after changing the route policy. Diagnostics checks
-both the public realtime route and whether macOS captured the private route.
+For Clash/Mihomo, use **Copy snippet** or
+`./cli/hkustgzconnect mihomo-profile`, merge the local node, and place the
+generated ordered rules before broad `DIRECT`, `GEOIP`, or `MATCH` rules. The
+generator does not rewrite subscriptions, proxy groups, DNS, or the final
+policy. HKUST(GZ) Connect also leaves Tailscale routes, MagicDNS, and exit-node
+settings untouched; overlapping subnet or TUN routes still require review.
 
 ## Build and test
 
@@ -185,6 +215,8 @@ by Git. Release archives are generated under `dist/`.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Network coexistence](docs/NETWORK_COEXISTENCE.md)
+- [Comparison with EasyConnect](docs/EASYCONNECT_COMPARISON.md)
 - [Traffic and proxying](docs/TRAFFIC_AND_PROXYING.md)
 - [Development and releases](docs/DEVELOPMENT.md)
 - [Security policy](SECURITY.md)

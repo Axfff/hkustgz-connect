@@ -72,8 +72,23 @@ cmp -s package.json desktop/package.json \
 
 root_version="$(node -p "require('./package.json').version")"
 desktop_version="$(node -p "require('./desktop/package.json').version")"
-[ "$root_version" = "$desktop_version" ] \
-  || fail "version mismatch: root=$root_version desktop=$desktop_version"
+desktop_lock_version="$(node -p "require('./desktop/package-lock.json').version")"
+desktop_lock_root_version="$(node -p "require('./desktop/package-lock.json').packages[''].version")"
+engine_version="$(awk -F'"' '/^version = / { print $2; exit }' engine/Cargo.toml)"
+engine_lock_version="$(awk -F'"' '
+  $0 == "name = \"ec-compat\"" { found = 1; next }
+  found && /^version = / { print $2; exit }
+' engine/Cargo.lock)"
+for component in \
+  "desktop=$desktop_version" \
+  "desktop-lock=$desktop_lock_version" \
+  "desktop-lock-root=$desktop_lock_root_version" \
+  "engine=$engine_version" \
+  "engine-lock=$engine_lock_version"
+do
+  [ "${component#*=}" = "$root_version" ] \
+    || fail "version mismatch: root=$root_version $component"
+done
 
 expected_license='GPL-3.0-only AND AGPL-3.0-only'
 root_license="$(node -p "require('./package.json').license")"

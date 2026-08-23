@@ -199,6 +199,20 @@ textarea.input { resize: vertical; line-height: 1.45; font-family: ui-monospace,
 .tool-row strong { display: block; font-size: 12px; }
 .tool-row code { display: block; margin-top: 5px; overflow-wrap: anywhere; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; user-select: text; }
 
+.integration-list { overflow: hidden; }
+.integration-row {
+  min-height: 68px; display: grid; grid-template-columns: minmax(180px,1fr) auto;
+  align-items: center; gap: 14px; padding: 10px 14px; border-bottom: 1px solid var(--line);
+}
+.integration-row:last-child { border-bottom: 0; }
+.integration-row > div:first-child { min-width: 0; }
+.integration-row strong { display: block; font-size: 12px; }
+.integration-row span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.integration-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.integration-actions.wrap { flex-wrap: wrap; }
+.integration-actions .button span { margin: 0; color: inherit; font-size: inherit; line-height: inherit; }
+.integration-select { width: 172px; min-height: 38px; padding-right: 24px; }
+
 .diagnostics-list { overflow: hidden; }
 .diagnostic-row { min-height: 50px; display: grid; grid-template-columns: 22px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
 .diagnostic-row:last-child { border-bottom: 0; }
@@ -248,6 +262,7 @@ textarea.input { resize: vertical; line-height: 1.45; font-family: ui-monospace,
   .fact:nth-child(2) { border-right: 0; }
   .fact:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .overview-grid { grid-template-columns: 1fr; }
+  .integration-row { grid-template-columns: minmax(150px,1fr) auto; }
 }
 
 @media (max-width: 600px) {
@@ -261,4 +276,6 @@ textarea.input { resize: vertical; line-height: 1.45; font-family: ui-monospace,
   .recovery-row { grid-template-columns: 1fr; }
   .settings-actions { flex-wrap: wrap; }
   .settings-actions .actions-spacer { display: none; }
+  .integration-row { grid-template-columns: 1fr; }
+  .integration-actions { justify-content: flex-start; flex-wrap: wrap; }
 }

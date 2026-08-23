@@ -9,9 +9,10 @@ const { pathToFileURL } = require('url');
 const { spawn } = require('child_process');
 const { loadSettings: readSettings, saveSettings: writeSettings } = require('./lib/settings-store');
 const { applySettingsPatch } = require('./lib/settings-update');
+const { planEngineSettingsUpdate } = require('./lib/engine-settings-update');
 const { PasswordSession } = require('./lib/credential-store');
 const { classifyEngineOutput, engineLifecycleSignal } = require('./lib/engine-output');
-const { buildPac } = require('./lib/pac');
+const { DEFAULT_ROUTE_DOMAINS, buildPac } = require('./lib/pac');
 const {
   loadNetworkPolicy, networkPoliciesEqual, normalizeNetworkPolicy, saveNetworkPolicy,
 } = require('./lib/network-policy');
@@ -19,12 +20,25 @@ const { loadCampusResources, openCampusResource } = require('./lib/campus-resour
 const { ensureOwnerOnly } = require('./lib/private-file');
 const { appendLog, readLogTail, resetLog } = require('./lib/secure-log');
 const { loadTrayImage } = require('./lib/tray-icon');
-const { describePortConflict, isCampusEngineExecutable } = require('./lib/port-conflict');
+const {
+  describePortConflict, isCampusEngineExecutable, isFallbackRelayExecutable,
+} = require('./lib/port-conflict');
 const { probeSocksConnect } = require('./lib/socks-health');
 const {
-  diagnosticsAreHealthy, probeIpv4Route, probeTcpEndpoint, probeWebSocketEndpoint,
+  classifyRelayReadiness, diagnosticsAreHealthy, listenerOwnedByLaunchAgent, parseLaunchctlPid,
+  probeIpv4Route, probeTcpEndpoint, probeUpgradeShapedHttpsEndpoint,
+  probeUpgradeShapedHttpsThroughSocks, summarizeHttpsReachability,
 } = require('./lib/diagnostics');
 const { renderShadowrocketModule } = require('./lib/shadowrocket-module');
+const { renderMihomoProfile } = require('./lib/mihomo-profile');
+const { openNetworkGuide } = require('./lib/network-guides');
+const {
+  FALLBACK_LABEL, fallbackServiceState, installFallbackService, removeFallbackService,
+  validatePorts,
+} = require('./lib/fallback-service');
+const {
+  acquireRelayOperationLock, relayOperationLockPath,
+} = require('./lib/relay-operation-lock');
 const {
   installManagedSsh, managedSshState, removeManagedSsh,
 } = require('./lib/hpc-ssh');
@@ -53,7 +67,13 @@ const SHARED_CONFIG_HOME = process.env.XDG_CONFIG_HOME || path.join(app.getPath(
 const POLICY = path.join(SHARED_CONFIG_HOME, 'hkustgz-connect', 'policy.json');
 const SSH_CONFIG = path.join(app.getPath('home'), '.ssh', 'config');
 const SSH_HELPER = path.join(app.getPath('home'), '.hkustgzconnect', 'bin', 'ec-ssh-route');
+const FALLBACK_HELPER = path.join(app.getPath('home'), '.hkustgzconnect', 'bin', 'ec-fallback');
+const FALLBACK_PLIST = path.join(
+  app.getPath('home'), 'Library', 'LaunchAgents', `${FALLBACK_LABEL}.plist`,
+);
+const FALLBACK_OPERATION_LOCK = relayOperationLockPath(app.getPath('home'));
 const GATEWAY_HOST = 'remote.hkust-gz.edu.cn';
+const PUBLIC_HTTPS_HOSTS = Object.freeze(['chatgpt.com', 'ws.chatgpt.com']);
 const passwordSession = new PasswordSession({
   file: CRED,
   safeStorage,
@@ -143,6 +163,17 @@ function sshHelperSourcePath() {
   return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
 }
 
+function fallbackHelperSourcePath() {
+  const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
+  const dir = app.isPackaged ? path.join(process.resourcesPath, 'engine') : path.join(__dirname, 'engine');
+  const candidates = [
+    path.join(dir, `ec-fallback-darwin-${arch}`),
+    path.join(dir, 'ec-fallback'),
+    path.join(__dirname, '..', 'engine', 'target', 'release', 'ec-fallback'),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+}
+
 function hpcSshState() {
   return managedSshState({ configFile: SSH_CONFIG, helperTarget: SSH_HELPER });
 }
@@ -154,6 +185,87 @@ function installHpcSsh(port = socksPort()) {
     helperSource: sshHelperSourcePath(),
     helperTarget: SSH_HELPER,
     proxyPort: port,
+  });
+}
+
+function fallbackState() {
+  const settings = loadSettings();
+  return fallbackServiceState({
+    executable: FALLBACK_HELPER,
+    launchAgent: FALLBACK_PLIST,
+    upstreamPort: settings.port,
+    primaryProxyPort: settings.primaryProxyPort,
+  });
+}
+
+async function fallbackRuntimeState() {
+  const installedState = fallbackState();
+  if (!installedState.supported) return { ...installedState, running: false, conflict: false };
+  const [pid, servicePid] = await Promise.all([
+    listeningPid(installedState.port),
+    launchAgentPid(FALLBACK_LABEL),
+  ]);
+  const executable = pid ? await listenerExecutable(pid) : '';
+  const executableMatches = isFallbackRelayExecutable(executable)
+    && path.resolve(executable) === path.resolve(FALLBACK_HELPER);
+  const running = installedState.installed && listenerOwnedByLaunchAgent({
+    listenerPid: pid,
+    launchAgentPid: servicePid,
+    executableMatches,
+  });
+  return {
+    ...installedState,
+    running,
+    conflict: !!pid && !running,
+    ownerPid: pid,
+    launchAgentPid: servicePid,
+    ownerName: executable ? path.basename(executable) : null,
+  };
+}
+
+async function withFallbackMutation(task) {
+  const lease = acquireRelayOperationLock({ lockFile: FALLBACK_OPERATION_LOCK });
+  let operationError = null;
+  try {
+    return await task();
+  } catch (error) {
+    operationError = error;
+    throw error;
+  } finally {
+    try {
+      if (!lease.release()) {
+        throw new Error('Compatibility relay lock ownership was lost before release');
+      }
+    } catch (releaseError) {
+      if (!operationError) throw releaseError;
+      if (operationError instanceof Error) {
+        operationError.message += `; lock release also failed: ${releaseError.message}`;
+      }
+    }
+  }
+}
+
+async function installFallback() {
+  return withFallbackMutation(async () => {
+    const settings = loadSettings();
+    const previous = fallbackState();
+    return installFallbackService({
+      source: fallbackHelperSourcePath(),
+      executable: FALLBACK_HELPER,
+      launchAgent: FALLBACK_PLIST,
+      upstreamPort: settings.port,
+      primaryProxyPort: settings.primaryProxyPort,
+      directInterface: previous.installed && previous.directInterface
+        ? previous.directInterface
+        : undefined,
+      verify: async () => {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if ((await fallbackRuntimeState()).running) return true;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        return false;
+      },
+    });
   });
 }
 
@@ -413,6 +525,20 @@ async function listeningPid(port) {
   const match = output.match(/^p(\d+)$/m);
   return match ? Number(match[1]) : null;
 }
+async function launchAgentPid(label) {
+  if (process.platform !== 'darwin' || typeof process.getuid !== 'function') return null;
+  const output = await run(
+    '/bin/launchctl',
+    ['print', `gui/${process.getuid()}/${label}`],
+    1500,
+  );
+  return parseLaunchctlPid(output);
+}
+async function listenerExecutable(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || process.platform === 'win32') return '';
+  const output = await run('lsof', ['-a', '-p', String(pid), '-d', 'txt', '-Fn'], 1500);
+  return output.match(/^n(.+)$/m)?.[1] || '';
+}
 function tcpPing(host, port) {
   return new Promise((resolve) => {
     if (!host) return resolve(null);
@@ -575,13 +701,30 @@ async function runDiagnostics() {
     lastDiagnostics = { running: true, checkedAt: null, durationMs: null, checks: [] };
     emit();
 
-    const port = socksPort();
+    const settings = loadSettings();
+    const port = Number(settings.port) || 1080;
+    const primaryProxyPort = Number(settings.primaryProxyPort) || 1082;
     const policy = loadPolicy();
-    const newestPrivateRoute = policy.routeIpv4Cidrs[policy.routeIpv4Cidrs.length - 1];
-    const privateRouteAddress = newestPrivateRoute?.split('/', 1)[0] || null;
+    const privateRouteAddresses = policy.routeIpv4Cidrs
+      .map((route) => route.split('/', 1)[0])
+      .filter(Boolean);
     const enginePid = engine ? engine.pid : externalEnginePid;
     const engineRunning = !!enginePid;
-    const [listener, ownerPid, campus, gateway, relay, privateRoute, publicRealtime] = await Promise.all([
+    const relayDiagnostic = fallbackRuntimeState().then(async (relayState) => ({
+      state: relayState,
+      dataPlane: relayState.running
+        ? await probeSocksConnect({
+          proxyPort: relayState.port,
+          targetHost: 'www.hkust-gz.edu.cn',
+          targetPort: 443,
+          timeoutMs: 5000,
+        })
+        : null,
+    }));
+    const [
+      listener, ownerPid, campus, gateway, relayResult, privateRoutes,
+      systemHttps, primaryProxyListener, primaryProxyHttps,
+    ] = await Promise.all([
       probeTcpEndpoint({ port, timeoutMs: 1500 }),
       listeningPid(port),
       engineRunning
@@ -593,11 +736,65 @@ async function runDiagnostics() {
         })
         : Promise.resolve(false),
       probeTcpEndpoint({ host: GATEWAY_HOST, port: 443, timeoutMs: 3000 }),
-      probeTcpEndpoint({ port: 1081, timeoutMs: 1000 }),
-      probeIpv4Route({ address: privateRouteAddress }),
-      probeWebSocketEndpoint({ host: 'chatgpt.com', timeoutMs: 5000 }),
+      relayDiagnostic,
+      Promise.all(privateRouteAddresses.map((address) => probeIpv4Route({ address }))),
+      Promise.all(PUBLIC_HTTPS_HOSTS.map(async (host) => ({
+        host,
+        ...await probeUpgradeShapedHttpsEndpoint({ host, timeoutMs: 5000 }),
+      }))),
+      probeTcpEndpoint({ port: primaryProxyPort, timeoutMs: 1500 }),
+      Promise.all(PUBLIC_HTTPS_HOSTS.map(async (host) => ({
+        host,
+        ...await probeUpgradeShapedHttpsThroughSocks({
+          proxyPort: primaryProxyPort,
+          host,
+          timeoutMs: 5000,
+        }),
+      }))),
     ]);
+    const relay = relayResult.state;
+    const relayDataPlane = relayResult.dataPlane;
+    const systemHttpsSummary = summarizeHttpsReachability(systemHttps);
+    const primaryProxyHttpsSummary = summarizeHttpsReachability(primaryProxyHttps);
+    const primaryProxyAvailable = primaryProxyListener.ok
+      || primaryProxyHttps.some((probe) => probe.ok);
     const listenerOwned = listener.ok && engineRunning && ownerPid === enginePid;
+    const relayListenerOwned = relay.running === true;
+    const relayReadiness = classifyRelayReadiness({
+      installed: relay.installed,
+      listenerOwned: relayListenerOwned,
+      needsUpdate: relay.needsUpdate,
+      conflict: relay.conflict,
+      dataPlane: relayDataPlane,
+    });
+    const relayReady = relayReadiness === 'ready';
+    const relayStatus = relayReady
+      ? 'pass'
+      : relayReadiness === 'not_installed' ? 'unavailable' : 'fail';
+    let relayDetail;
+    switch (relayReadiness) {
+      case 'stale':
+        relayDetail = 'Installed relay uses previous ports; update it from Access';
+        break;
+      case 'ready':
+        relayDetail = `LaunchAgent process ${relay.ownerPid} owns 127.0.0.1:1081 and passed a campus SOCKS5 CONNECT`;
+        break;
+      case 'data_plane_failed':
+        relayDetail = `LaunchAgent process ${relay.ownerPid} owns 127.0.0.1:1081, but its campus SOCKS5 CONNECT failed`;
+        break;
+      case 'conflict':
+        relayDetail = `Port 1081 listener ${relay.ownerPid || 'unknown'} does not match LaunchAgent process ${relay.launchAgentPid || 'not running'} (${relay.ownerName || 'unknown process'})`;
+        break;
+      case 'not_running':
+        relayDetail = 'Installed, but its listener is not running';
+        break;
+      default:
+        relayDetail = 'Not installed';
+    }
+    const capturedPrivateRoutes = privateRoutes.filter((route) => route.tunneled);
+    const privateRouteInterfaces = [...new Set(
+      privateRoutes.map((route) => route.interface).filter(Boolean),
+    )];
 
     const checks = [
       {
@@ -640,35 +837,53 @@ async function runDiagnostics() {
       },
       {
         id: 'relay',
-        label: 'Shadowrocket relay',
-        status: relay.ok ? 'pass' : 'unavailable',
-        detail: relay.ok ? 'Listening on 127.0.0.1:1081' : 'Not installed or not running',
+        label: 'Compatibility relay readiness',
+        status: relayStatus,
+        detail: relayDetail,
         required: false,
       },
       {
-        id: 'private-route',
-        label: 'Shadowrocket private route',
-        status: !relay.ok || !privateRouteAddress
+        id: 'private-routes',
+        label: 'Campus private route visibility',
+        status: !privateRouteAddresses.length
           ? 'unavailable'
-          : privateRoute.ok ? 'pass' : 'fail',
-        detail: !relay.ok
-          ? 'Relay not installed or not running'
-          : !privateRouteAddress
-            ? 'No private route configured'
-            : privateRoute.ok
-              ? `Captured by ${privateRoute.interface}`
-              : privateRoute.interface
-                ? `Still using ${privateRoute.interface}; replace the enabled Shadowrocket module`
-                : 'Could not inspect the macOS route',
+          : capturedPrivateRoutes.length === privateRouteAddresses.length
+            ? 'unavailable'
+            : relayReady ? 'fail' : 'unavailable',
+        detail: !privateRouteAddresses.length
+          ? 'No private campus CIDRs configured'
+          : capturedPrivateRoutes.length === privateRouteAddresses.length
+            ? `${privateRouteAddresses.length} route(s) use ${privateRouteInterfaces.join(', ')}; VPN/TUN owner not identified`
+            : relayReady
+              ? `${capturedPrivateRoutes.length}/${privateRouteAddresses.length} route(s) captured; review module and Tailscale overlap`
+              : privateRouteInterfaces.length
+                ? `Routes currently use ${privateRouteInterfaces.join(', ')}; no owner is attributed`
+                : 'Could not inspect the configured macOS routes',
         required: false,
       },
       {
-        id: 'public-realtime',
-        label: 'Public realtime route',
-        status: publicRealtime.ok ? 'pass' : 'fail',
-        detail: publicRealtime.ok
-          ? `chatgpt.com WebSocket path answered in ${Math.round(publicRealtime.latencyMs)} ms`
-          : `chatgpt.com failed before WebSocket response (${publicRealtime.error || 'unknown'})`,
+        id: 'scoped-routing',
+        label: 'Application-scoped routing',
+        status: 'pass',
+        detail: 'The campus engine does not replace the default route or system DNS',
+        required: false,
+      },
+      {
+        id: 'public-system-https',
+        label: 'System/TUN HTTPS prerequisite',
+        status: systemHttpsSummary.ok ? 'pass' : 'fail',
+        detail: `${systemHttpsSummary.detail} via system/TUN. HTTPS responses only; persistent realtime was not verified`,
+        required: false,
+      },
+      {
+        id: 'public-primary-socks',
+        label: 'Explicit primary SOCKS prerequisite',
+        status: primaryProxyHttpsSummary.ok ? 'pass' : primaryProxyAvailable ? 'fail' : 'unavailable',
+        detail: primaryProxyHttpsSummary.ok
+          ? `${primaryProxyHttpsSummary.detail} through SOCKS5 127.0.0.1:${primaryProxyPort}. HTTPS responses only; persistent realtime was not verified`
+          : primaryProxyAvailable
+            ? `${primaryProxyHttpsSummary.detail} through SOCKS5 127.0.0.1:${primaryProxyPort}. Persistent realtime was not verified`
+            : `No primary SOCKS listener on 127.0.0.1:${primaryProxyPort}; ${primaryProxyHttpsSummary.detail}. Persistent realtime was not tested`,
         required: false,
       },
     ];
@@ -698,7 +913,7 @@ function refreshPacFile(settings = loadSettings()) {
   const policy = loadPolicy();
   fs.writeFileSync(
     PAC_FILE,
-    buildPac(settings.routeDomains, Number(settings.port), policy.routeIpv4Cidrs),
+    buildPac(DEFAULT_ROUTE_DOMAINS, Number(settings.port), policy.routeIpv4Cidrs),
     { mode: 0o600 },
   );
   ensureOwnerOnly(PAC_FILE);
@@ -715,25 +930,32 @@ async function openExternalCampusResource(rawUrl) {
 }
 
 // ---------- IPC ----------
-ipcMain.handle('get-state', () => {
+ipcMain.handle('get-state', async () => {
+  const fallbackService = await fallbackRuntimeState();
+  const settings = loadSettings();
   const passwordPresent = hasPassword();
   return {
-    ...publicRuntimeState(), settings: { ...loadSettings(), ...loadPolicy() },
+    ...publicRuntimeState(), settings: { ...settings, ...loadPolicy() },
     hasPassword: passwordPresent, pacUrl: pacUrl(),
-    loggedIn: (passwordPresent && !!loadSettings().username) || !!externalEnginePid,
+    loggedIn: (passwordPresent && !!settings.username) || !!externalEnginePid,
     platform: process.platform,
     version: app.getVersion(), campusResources: loadCampusResources(), telemetry: lastTele,
-    hpcSsh: hpcSshState(),
+    hpcSsh: hpcSshState(), fallbackService,
   };
 });
 ipcMain.handle('save', async (_e, p) => {
   const previous = loadSettings();
   let next;
   let portChanged;
+  let primaryProxyPortChanged;
   let nextPolicy;
   let policyChanged;
+  let engineSettingsPlan;
   try {
-    ({ settings: next, portChanged } = applySettingsPatch(previous, p));
+    ({ settings: next, portChanged, primaryProxyPortChanged } = applySettingsPatch(previous, p));
+    if ((portChanged || primaryProxyPortChanged) && fallbackState().installed) {
+      validatePorts(next.port, next.primaryProxyPort);
+    }
     const currentPolicy = loadPolicy();
     const policyWasSubmitted = p && (
       Object.prototype.hasOwnProperty.call(p, 'vpnDnsServers')
@@ -746,6 +968,12 @@ ipcMain.handle('save', async (_e, p) => {
       })
       : currentPolicy;
     policyChanged = !networkPoliciesEqual(currentPolicy, nextPolicy);
+    engineSettingsPlan = planEngineSettingsUpdate({
+      engineOwner: engine ? 'app' : externalEnginePid ? 'shared' : null,
+      portChanged,
+      policyChanged,
+    });
+    if (!engineSettingsPlan.allowed) throw new Error(engineSettingsPlan.error);
   } catch (error) {
     return { ok: false, error: error.message, settings: { ...previous, ...loadPolicy() } };
   }
@@ -767,18 +995,25 @@ ipcMain.handle('save', async (_e, p) => {
       pacError = pacError ? `${pacError} ${warning}` : warning;
     }
   }
+  if ((portChanged || primaryProxyPortChanged) && fallbackState().installed) {
+    try {
+      await installFallback();
+    } catch (error) {
+      const warning = `Settings saved, but the compatibility relay could not be updated: ${error.message}`;
+      pacError = pacError ? `${pacError} ${warning}` : warning;
+    }
+  }
   if (p && typeof p.password === 'string' && p.password.length && !await savePassword(p.password)) {
     return { ok: false, error: '系统安全存储不可用，密码未保存' };
   }
   if (p && typeof p.startAtLogin === 'boolean') { try { app.setLoginItemSettings({ openAtLogin: p.startAtLogin }); } catch {} }
   let reconnected = false;
-  if ((engine || externalEnginePid) && (portChanged || (policyChanged && engine))) {
+  if (engineSettingsPlan.reconnect) {
     await reconnect();
     reconnected = true;
   }
-  if (policyChanged && externalEnginePid) {
-    const ownershipWarning = 'Network policy saved. Restart the tunnel from the interface that owns it to apply engine routes.';
-    pacError = pacError ? `${pacError} ${ownershipWarning}` : ownershipWarning;
+  if (engineSettingsPlan.warning) {
+    pacError = pacError ? `${pacError} ${engineSettingsPlan.warning}` : engineSettingsPlan.warning;
   }
   if (pacError) {
     state.lastError = pacError;
@@ -796,6 +1031,25 @@ ipcMain.handle('connect', async () => { await connect(); return { ok: true }; })
 ipcMain.handle('disconnect', () => { disconnect(); return { ok: true }; });
 ipcMain.handle('reconnect', reconnect);
 ipcMain.handle('run-diagnostics', runDiagnostics);
+ipcMain.handle('install-fallback-service', async () => {
+  try {
+    await installFallback();
+    return { ok: true, state: await fallbackRuntimeState() };
+  } catch (error) {
+    return { ok: false, error: error.message, state: await fallbackRuntimeState() };
+  }
+});
+ipcMain.handle('remove-fallback-service', async () => {
+  try {
+    await withFallbackMutation(() => removeFallbackService({
+      executable: FALLBACK_HELPER,
+      launchAgent: FALLBACK_PLIST,
+    }));
+    return { ok: true, state: await fallbackRuntimeState() };
+  } catch (error) {
+    return { ok: false, error: error.message, state: await fallbackRuntimeState() };
+  }
+});
 ipcMain.handle('install-hpc-ssh', () => {
   try { return { ok: true, state: installHpcSsh() }; }
   catch (error) { return { ok: false, error: error.message, state: hpcSshState() }; }
@@ -825,12 +1079,27 @@ ipcMain.handle('ssh-config', () => {
   }
   return `${note}\nProxyCommand /usr/bin/nc -X 5 -x 127.0.0.1:${port} %h %p`;
 });
-ipcMain.handle('shadowrocket-module', () => {
+ipcMain.handle('shadowrocket-module', (_event, preset = 'campus') => {
+  const templateName = preset === 'repair'
+    ? 'shadowrocket-hkustgz-repair.module.template'
+    : 'shadowrocket-hkustgz.module.template';
   const template = fs.readFileSync(
-    path.join(__dirname, 'assets', 'shadowrocket-hkustgz.module.template'),
+    path.join(__dirname, 'assets', templateName),
     'utf8',
   );
   return renderShadowrocketModule(template, loadPolicy().routeIpv4Cidrs);
+});
+ipcMain.handle('mihomo-profile', () => {
+  const template = fs.readFileSync(
+    path.join(__dirname, 'assets', 'mihomo-hkustgz.yaml.template'),
+    'utf8',
+  );
+  const settings = loadSettings();
+  return renderMihomoProfile(template, {
+    port: settings.port,
+    routeDomains: DEFAULT_ROUTE_DOMAINS,
+    routeIpv4Cidrs: loadPolicy().routeIpv4Cidrs,
+  });
 });
 ipcMain.handle('logout', () => {
   disconnect();
@@ -843,6 +1112,14 @@ ipcMain.handle('get-logs', () => {
 ipcMain.handle('open-log', () => shell.openPath(LOG));
 ipcMain.handle('copy', (_e, text) => { clipboard.writeText(String(text || '')); return { ok: true }; });
 ipcMain.handle('open-external-campus-resource', (_event, url) => openExternalCampusResource(url));
+ipcMain.handle('open-network-guide', async (_event, topic) => {
+  try {
+    const url = await openNetworkGuide(topic, app.getVersion(), (value) => shell.openExternal(value));
+    return { ok: true, url };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
 ipcMain.handle('resize', () => {});
 
 // ---------- window ----------

@@ -4,6 +4,9 @@ const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
 const net = require('node:net');
 const tls = require('node:tls');
+const {
+  createDeadline, openSocksTunnel, remainingDeadlineMs,
+} = require('./socks-health');
 
 function probeTcpEndpoint({ host = '127.0.0.1', port, timeoutMs = 1500 } = {}) {
   return new Promise((resolve) => {
@@ -37,9 +40,34 @@ function parseRouteInterface(output) {
   return String(output || '').match(/^\s*interface:\s*(\S+)\s*$/m)?.[1] || null;
 }
 
+function parseLaunchctlPid(output) {
+  const pid = Number(String(output || '').match(/^\s*pid\s*=\s*(\d+)\s*$/m)?.[1]);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+function listenerOwnedByLaunchAgent({ listenerPid, launchAgentPid, executableMatches } = {}) {
+  return Number.isInteger(listenerPid)
+    && listenerPid > 0
+    && listenerPid === launchAgentPid
+    && executableMatches === true;
+}
+
+function classifyRelayReadiness({
+  installed = false,
+  listenerOwned = false,
+  needsUpdate = false,
+  conflict = false,
+  dataPlane = null,
+} = {}) {
+  if (needsUpdate) return 'stale';
+  if (listenerOwned) return dataPlane === true ? 'ready' : 'data_plane_failed';
+  if (conflict) return 'conflict';
+  return installed ? 'not_running' : 'not_installed';
+}
+
 function probeIpv4Route({ address, platform = process.platform, run = execFile } = {}) {
   if (platform !== 'darwin' || !address) {
-    return Promise.resolve({ ok: false, interface: null, error: 'unavailable' });
+    return Promise.resolve({ ok: false, interface: null, tunneled: false, error: 'unavailable' });
   }
   return new Promise((resolve) => {
     run('/sbin/route', ['-n', 'get', String(address)], {
@@ -47,11 +75,16 @@ function probeIpv4Route({ address, platform = process.platform, run = execFile }
       timeout: 1500,
       maxBuffer: 64 * 1024,
     }, (error, stdout) => {
-      if (error) return resolve({ ok: false, interface: null, error: 'route_lookup_failed' });
+      if (error) {
+        return resolve({
+          ok: false, interface: null, tunneled: false, error: 'route_lookup_failed',
+        });
+      }
       const routeInterface = parseRouteInterface(stdout);
       resolve({
-        ok: routeInterface?.startsWith('utun') || false,
+        ok: !!routeInterface,
         interface: routeInterface,
+        tunneled: routeInterface?.startsWith('utun') || false,
         error: routeInterface ? null : 'route_interface_missing',
       });
     });
@@ -64,22 +97,49 @@ function parseHttpStatusLine(data) {
   return match ? Number(match[1]) : null;
 }
 
-function probeWebSocketEndpoint({
+function summarizeHttpsReachability(results) {
+  const probes = Array.isArray(results) ? results : [];
+  const detail = probes.map((probe) => {
+    const host = String(probe?.host || 'unknown host');
+    if (!probe?.ok) return `${host} failed (${probe?.error || 'no HTTP response'})`;
+    const latency = Number.isFinite(probe.latencyMs)
+      ? ` in ${Math.round(probe.latencyMs)} ms`
+      : '';
+    return `${host} returned HTTP ${probe.statusCode}${latency}`;
+  }).join('; ');
+  return {
+    ok: probes.length > 0 && probes.every((probe) => probe?.ok === true),
+    detail: detail || 'No HTTPS probes ran',
+  };
+}
+
+function probeUpgradeShapedHttpsEndpoint({
   host,
   port = 443,
   path = '/',
   timeoutMs = 5000,
   rejectUnauthorized = true,
   connect = tls.connect,
+  startedAt = process.hrtime.bigint(),
+  deadlineNs = null,
 } = {}) {
   return new Promise((resolve) => {
-    const startedAt = process.hrtime.bigint();
+    const deadline = typeof deadlineNs === 'bigint'
+      ? deadlineNs
+      : createDeadline(timeoutMs, startedAt);
+    const deadlineDelayMs = remainingDeadlineMs(deadline);
+    if (deadlineDelayMs === 0) {
+      return resolve({ ok: false, latencyMs: null, statusCode: null, error: 'timeout' });
+    }
+
     let settled = false;
     let response = '';
     let socket;
+    let deadlineTimer;
     const finish = (ok, error = null, statusCode = null) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadlineTimer);
       const latencyMs = ok
         ? Number(process.hrtime.bigint() - startedAt) / 1e6
         : null;
@@ -87,6 +147,7 @@ function probeWebSocketEndpoint({
       resolve({ ok, latencyMs, statusCode, error });
     };
     try {
+      deadlineTimer = setTimeout(() => finish(false, 'timeout'), deadlineDelayMs);
       socket = connect({
         host,
         port: Number(port),
@@ -105,13 +166,15 @@ function probeWebSocketEndpoint({
           '',
         ].join('\r\n'));
       });
-      socket.setTimeout(timeoutMs);
+      socket.setTimeout(deadlineDelayMs);
       socket.on('data', (chunk) => {
         response += chunk.toString('latin1');
         if (response.length > 8192) return finish(false, 'invalid_response');
         const end = response.indexOf('\r\n');
         if (end === -1) return;
         const statusCode = parseHttpStatusLine(response.slice(0, end));
+        // A status line proves HTTPS reachability only. The target may reject or
+        // ignore Upgrade, so this probe must never be presented as a WebSocket pass.
         finish(statusCode !== null, statusCode === null ? 'invalid_response' : null, statusCode);
       });
       socket.once('timeout', () => finish(false, 'timeout'));
@@ -123,11 +186,70 @@ function probeWebSocketEndpoint({
   });
 }
 
+async function probeUpgradeShapedHttpsThroughSocks({
+  proxyHost = '127.0.0.1',
+  proxyPort,
+  host,
+  port = 443,
+  path = '/',
+  timeoutMs = 5000,
+  rejectUnauthorized = true,
+  openTunnel = openSocksTunnel,
+  connect = tls.connect,
+} = {}) {
+  const startedAt = process.hrtime.bigint();
+  const deadlineNs = createDeadline(timeoutMs, startedAt);
+  let tunnel;
+  try {
+    tunnel = await openTunnel({
+      proxyHost,
+      proxyPort,
+      targetHost: host,
+      targetPort: port,
+      timeoutMs,
+      deadlineNs,
+    });
+  } catch {
+    tunnel = null;
+  }
+  if (!tunnel) {
+    const error = remainingDeadlineMs(deadlineNs) === 0 ? 'timeout' : 'socks_connect_failed';
+    return { ok: false, latencyMs: null, statusCode: null, error };
+  }
+  if (remainingDeadlineMs(deadlineNs) === 0) {
+    try { tunnel.destroy(); } catch {}
+    return { ok: false, latencyMs: null, statusCode: null, error: 'timeout' };
+  }
+
+  return probeUpgradeShapedHttpsEndpoint({
+    host,
+    port,
+    path,
+    timeoutMs,
+    rejectUnauthorized,
+    startedAt,
+    deadlineNs,
+    connect: (options, secure) => {
+      try {
+        return connect({ ...options, socket: tunnel }, secure);
+      } catch (error) {
+        try { tunnel.destroy(); } catch {}
+        throw error;
+      }
+    },
+  });
+}
+
 module.exports = {
+  classifyRelayReadiness,
   diagnosticsAreHealthy,
+  listenerOwnedByLaunchAgent,
   parseHttpStatusLine,
+  parseLaunchctlPid,
   parseRouteInterface,
   probeIpv4Route,
   probeTcpEndpoint,
-  probeWebSocketEndpoint,
+  probeUpgradeShapedHttpsEndpoint,
+  probeUpgradeShapedHttpsThroughSocks,
+  summarizeHttpsReachability,
 };

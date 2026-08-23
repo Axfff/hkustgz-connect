@@ -8,8 +8,14 @@ ENGINE_SOURCE_ROOT="$ROOT/engine"
 ENGINE_CONFIG="$ROOT/config/hkustgz.json"
 PAC_TEMPLATE="$HERE/campus-only.pac.template"
 SHADOWROCKET_TEMPLATE="$HERE/shadowrocket-hkustgz.module.template"
+SHADOWROCKET_REPAIR_TEMPLATE="$HERE/shadowrocket-hkustgz-repair.module.template"
+MIHOMO_TEMPLATE="$HERE/mihomo-hkustgz.yaml.template"
 [ -f "$SHADOWROCKET_TEMPLATE" ] \
   || SHADOWROCKET_TEMPLATE="$ROOT/desktop/assets/shadowrocket-hkustgz.module.template"
+[ -f "$SHADOWROCKET_REPAIR_TEMPLATE" ] \
+  || SHADOWROCKET_REPAIR_TEMPLATE="$ROOT/desktop/assets/shadowrocket-hkustgz-repair.module.template"
+[ -f "$MIHOMO_TEMPLATE" ] \
+  || MIHOMO_TEMPLATE="$ROOT/desktop/assets/mihomo-hkustgz.yaml.template"
 
 case "$(uname -m)" in
   arm64) ENGINE_ARCH="arm64" ;;
@@ -32,6 +38,8 @@ LOG="$RUNDIR/hkustgzconnect.log"
 PIDFILE="$RUNDIR/hkustgzconnect.pid"
 PAC_FILE="$RUNDIR/campus-only.pac"
 SHADOWROCKET_MODULE="$RUNDIR/hkustgz-connect.module"
+SHADOWROCKET_REPAIR_MODULE="$RUNDIR/hkustgz-connect-repair.module"
+MIHOMO_PROFILE="$RUNDIR/hkustgz-connect-mihomo.yaml"
 KEYCHAIN_SERVICE="hkustgzconnect"
 SOCKS_HOST="127.0.0.1"
 SOCKS_PORT="$(awk -F'[:\"]' '/^socks_bind/{print $(NF-1); exit}' "$CONF" 2>/dev/null)"
@@ -39,20 +47,187 @@ SOCKS_PORT="${SOCKS_PORT:-1080}"
 LABEL="com.hkustgz.connect"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 FALLBACK_PORT="1081"
-SHADOWROCKET_PORT="${HKUSTGZ_SHADOWROCKET_PORT:-1082}"
 FALLBACK_BIN="$ENGINE_SOURCE_ROOT/bin/ec-fallback-darwin-$ENGINE_ARCH"
 [ -x "$FALLBACK_BIN" ] || FALLBACK_BIN="$ENGINE_SOURCE_ROOT/target/release/ec-fallback"
+[ -z "${HKUSTGZ_FALLBACK_BIN:-}" ] || FALLBACK_BIN="$HKUSTGZ_FALLBACK_BIN"
 FALLBACK_INSTALL="$RUNDIR/bin/ec-fallback"
 FALLBACK_LABEL="com.hkustgz.connect-fallback"
 FALLBACK_PLIST="$HOME/Library/LaunchAgents/$FALLBACK_LABEL.plist"
+RELAY_LOCK_FILE="$RUNDIR/compatibility-relay.lock"
+DESKTOP_SETTINGS="$HOME/Library/Application Support/hkustgzconnect/settings.json"
 CAMPUS_PROBE_URL="https://ssfas.hkust-gz.edu.cn/"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 valid_port() {
-  [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1025 ] && [ "$1" -le 65535 ]
+  [[ "$1" =~ ^[1-9][0-9]*$ ]] && [ "$1" -ge 1025 ] && [ "$1" -le 65535 ]
 }
+regular_file_or_absent() {
+  local file="$1"
+  [ ! -L "$file" ] && { [ ! -e "$file" ] || [ -f "$file" ]; }
+}
+prepare_relay_lock_file() {
+  [ ! -L "$RUNDIR" ] && [ -d "$RUNDIR" ] \
+    && [ "$(stat -f '%u' "$RUNDIR" 2>/dev/null)" = "$(id -u)" ] \
+    || die "compatibility relay state directory is not private and owner-controlled: $RUNDIR"
+  if [ -L "$RELAY_LOCK_FILE" ] || { [ -e "$RELAY_LOCK_FILE" ] && [ ! -f "$RELAY_LOCK_FILE" ]; }; then
+    die "compatibility relay lock path must be a regular file: $RELAY_LOCK_FILE"
+  fi
+  if [ ! -e "$RELAY_LOCK_FILE" ]; then
+    (set -o noclobber; umask 077; : > "$RELAY_LOCK_FILE") 2>/dev/null || true
+  fi
+  [ ! -L "$RELAY_LOCK_FILE" ] && [ -f "$RELAY_LOCK_FILE" ] \
+    && [ "$(stat -f '%u' "$RELAY_LOCK_FILE" 2>/dev/null)" = "$(id -u)" ] \
+    || die "compatibility relay lock file is not owned by this user: $RELAY_LOCK_FILE"
+  chmod 600 "$RELAY_LOCK_FILE" || die "could not secure the compatibility relay lock file"
+}
+
+run_with_relay_lock() {
+  prepare_relay_lock_file
+  (
+    if /usr/bin/lockf -s -t 0 9; then status=0; else status=$?; fi
+    if [ "$status" -eq 75 ]; then
+      printf 'error: compatibility relay is busy: another install, update, or remove operation is running\n' >&2
+      exit 1
+    fi
+    if [ "$status" -ne 0 ]; then
+      printf 'error: could not acquire the compatibility relay lock (status %s)\n' "$status" >&2
+      exit "$status"
+    fi
+    "$@"
+  ) 9<>"$RELAY_LOCK_FILE"
+}
+
+plist_argument_value() {
+  local file="$1" argument="$2" count index value
+  [ ! -L "$file" ] && [ -f "$file" ] || return 1
+  count="$(plutil -extract ProgramArguments raw -expect array -o - "$file" 2>/dev/null)" \
+    || return 1
+  [[ "$count" =~ ^[0-9]+$ ]] || return 1
+  index=0
+  while [ "$index" -lt "$count" ]; do
+    value="$(plutil -extract "ProgramArguments.$index" raw -expect string -o - "$file" 2>/dev/null)" \
+      || return 1
+    if [ "$value" = "$argument" ]; then
+      index=$((index + 1))
+      [ "$index" -lt "$count" ] || return 1
+      plutil -extract "ProgramArguments.$index" raw -expect string -o - "$file" 2>/dev/null
+      return
+    fi
+    index=$((index + 1))
+  done
+  return 1
+}
+installed_fallback_primary_port() {
+  local endpoint port
+  endpoint="$(plist_argument_value "$FALLBACK_PLIST" --general-upstream)" || return 1
+  case "$endpoint" in
+    "$SOCKS_HOST":*) port="${endpoint##*:}" ;;
+    *) return 1 ;;
+  esac
+  valid_port "$port" || return 1
+  printf '%s\n' "$port"
+}
+desktop_primary_proxy_port() {
+  local owner permissions permissions_value port
+  [ ! -L "$DESKTOP_SETTINGS" ] && [ -f "$DESKTOP_SETTINGS" ] || return 1
+  owner="$(stat -f '%u' "$DESKTOP_SETTINGS" 2>/dev/null)" || return 1
+  [ "$owner" = "$(id -u)" ] || return 1
+  permissions="$(stat -f '%Lp' "$DESKTOP_SETTINGS" 2>/dev/null)" || return 1
+  [[ "$permissions" =~ ^[0-7]{3,4}$ ]] || return 1
+  permissions_value=$((8#$permissions))
+  [ $((permissions_value & 022)) -eq 0 ] || return 1
+  port="$(plutil -extract primaryProxyPort raw -expect integer -o - "$DESKTOP_SETTINGS" 2>/dev/null)" \
+    || return 1
+  valid_port "$port" || return 1
+  printf '%s\n' "$port"
+}
+resolve_primary_proxy_port() {
+  local candidate
+  if [ -n "${HKUSTGZ_PRIMARY_PROXY_PORT:-}" ]; then
+    PRIMARY_PROXY_PORT="$HKUSTGZ_PRIMARY_PROXY_PORT"
+    PRIMARY_PROXY_SOURCE="HKUSTGZ_PRIMARY_PROXY_PORT"
+  elif [ -n "${HKUSTGZ_SHADOWROCKET_PORT:-}" ]; then
+    PRIMARY_PROXY_PORT="$HKUSTGZ_SHADOWROCKET_PORT"
+    PRIMARY_PROXY_SOURCE="HKUSTGZ_SHADOWROCKET_PORT"
+  elif candidate="$(installed_fallback_primary_port)"; then
+    PRIMARY_PROXY_PORT="$candidate"
+    PRIMARY_PROXY_SOURCE="installed relay"
+  elif candidate="$(desktop_primary_proxy_port)"; then
+    PRIMARY_PROXY_PORT="$candidate"
+    PRIMARY_PROXY_SOURCE="desktop settings"
+  else
+    PRIMARY_PROXY_PORT="1082"
+    PRIMARY_PROXY_SOURCE="default"
+  fi
+}
+ipv4_number() {
+  local address="$1" first second third fourth octet
+  [[ "$address" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  IFS=. read -r first second third fourth <<< "$address"
+  for octet in "$first" "$second" "$third" "$fourth"; do
+    [[ "$octet" =~ ^(0|[1-9][0-9]{0,2})$ ]] && [ "$octet" -le 255 ] || return 1
+  done
+  printf '%s\n' "$((first * 16777216 + second * 65536 + third * 256 + fourth))"
+}
+valid_ipv4_cidr() {
+  local cidr="$1" address prefix number host_bits block
+  [[ "$cidr" =~ ^[^/]+/([1-9]|[12][0-9]|3[0-2])$ ]] || return 1
+  address="${cidr%/*}"
+  prefix="${cidr#*/}"
+  number="$(ipv4_number "$address")" || return 1
+  host_bits=$((32 - prefix))
+  block=$((1 << host_bits))
+  [ $((number % block)) -eq 0 ]
+}
+validate_policy_file() {
+  local file="$1" version dns_count route_count index address number first cidr keys_file remaining policy_key
+  version="$(plutil -extract version raw -expect integer -o - "$file" 2>/dev/null)" \
+    || die "network policy must contain integer version 1"
+  [ "$version" = "1" ] || die "network policy version must be 1"
+  dns_count="$(plutil -extract vpn_dns_servers raw -expect array -o - "$file" 2>/dev/null)" \
+    || die "network policy must contain a vpn_dns_servers array"
+  route_count="$(plutil -extract route_ipv4_cidrs raw -expect array -o - "$file" 2>/dev/null)" \
+    || die "network policy must contain a route_ipv4_cidrs array"
+  [[ "$dns_count" =~ ^[0-9]+$ ]] && [ "$dns_count" -le 4 ] \
+    || die "network policy VPN DNS servers are limited to 4 entries"
+  [[ "$route_count" =~ ^[0-9]+$ ]] && [ "$route_count" -le 128 ] \
+    || die "network policy IPv4 routes are limited to 128 entries"
+  keys_file="$(mktemp "${TMPDIR:-/tmp}/hkustgz-policy-keys.XXXXXX")" \
+    || die "cannot create a temporary policy validator"
+  cp "$file" "$keys_file" \
+    || { rm -f "$keys_file"; die "cannot inspect network policy keys"; }
+  for policy_key in version vpn_dns_servers route_ipv4_cidrs; do
+    plutil -remove "$policy_key" "$keys_file" >/dev/null 2>&1 \
+      || { rm -f "$keys_file"; die "network policy structure is invalid"; }
+  done
+  remaining="$(plutil -convert json -o - "$keys_file" 2>/dev/null)" \
+    || { rm -f "$keys_file"; die "network policy structure is invalid"; }
+  rm -f "$keys_file" || die "cannot remove the temporary policy validator"
+  [ "$remaining" = "{}" ] || die "network policy contains unsupported keys"
+  index=0
+  while [ "$index" -lt "$dns_count" ]; do
+    address="$(plutil -extract "vpn_dns_servers.$index" raw -expect string -o - "$file" 2>/dev/null)" \
+      || die "network policy VPN DNS[$index] must be a string"
+    number="$(ipv4_number "$address")" \
+      || die "network policy VPN DNS[$index] is invalid: $address"
+    first="${address%%.*}"
+    [ "$number" -ne 0 ] && [ "$number" -ne 4294967295 ] \
+      && { [ "$first" -lt 224 ] || [ "$first" -gt 239 ]; } \
+      || die "network policy VPN DNS[$index] is unusable: $address"
+    index=$((index + 1))
+  done
+  index=0
+  while [ "$index" -lt "$route_count" ]; do
+    cidr="$(plutil -extract "route_ipv4_cidrs.$index" raw -expect string -o - "$file" 2>/dev/null)" \
+      || die "network policy route[$index] must be a string"
+    valid_ipv4_cidr "$cidr" \
+      || die "network policy route[$index] is invalid or noncanonical: $cidr"
+    index=$((index + 1))
+  done
+}
+resolve_primary_proxy_port
 valid_port "$SOCKS_PORT" || die "SOCKS port must be within 1025..65535"
-valid_port "$SHADOWROCKET_PORT" || die "Shadowrocket SOCKS port must be within 1025..65535"
+valid_port "$PRIMARY_PROXY_PORT" || die "primary proxy SOCKS port must be within 1025..65535"
 
 mkdir -p "$RUNDIR"
 chmod 700 "$RUNDIR"
@@ -67,8 +242,9 @@ require_account() {
 
 get_pw() { security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$ACC" -w 2>/dev/null; }
 socks_listening() { lsof -nP -iTCP@"$SOCKS_HOST":"$SOCKS_PORT" -sTCP:LISTEN >/dev/null 2>&1; }
-fallback_listening() { lsof -nP -iTCP@"$SOCKS_HOST":"$FALLBACK_PORT" -sTCP:LISTEN >/dev/null 2>&1; }
+fallback_port_listening() { lsof -nP -iTCP@"$SOCKS_HOST":"$FALLBACK_PORT" -sTCP:LISTEN >/dev/null 2>&1; }
 listener_pids() { lsof -nP -t -iTCP@"$SOCKS_HOST":"$SOCKS_PORT" -sTCP:LISTEN 2>/dev/null; }
+fallback_listener_pids() { lsof -nP -t -iTCP@"$SOCKS_HOST":"$FALLBACK_PORT" -sTCP:LISTEN 2>/dev/null; }
 listener_executable() {
   local pid="$1"
   lsof -a -p "$pid" -d txt -Fn 2>/dev/null | awk '/^n/{print substr($0,2); exit}'
@@ -84,6 +260,43 @@ shared_engine_listening() {
   done < <(listener_pids)
   [ "$listeners" -eq 1 ] && [ "$engines" -eq 1 ]
 }
+fallback_listener_pid() {
+  local pid executable listeners=0 relay_pid=''
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    listeners=$((listeners + 1))
+    executable="$(listener_executable "$pid")"
+    [ "$executable" = "$FALLBACK_INSTALL" ] && relay_pid="$pid"
+  done < <(fallback_listener_pids)
+  [ "$listeners" -eq 1 ] && [ -n "$relay_pid" ] || return 1
+  printf '%s\n' "$relay_pid"
+}
+fallback_launchd_pid() {
+  launchctl print "gui/$(id -u)/$FALLBACK_LABEL" 2>/dev/null \
+    | awk '$1 == "pid" && $2 == "=" && $3 ~ /^[0-9]+$/ {print $3; exit}'
+}
+fallback_service_loaded() {
+  launchctl print "gui/$(id -u)/$FALLBACK_LABEL" >/dev/null 2>&1
+}
+fallback_relay_listening() {
+  local listener_pid launchd_pid
+  listener_pid="$(fallback_listener_pid)" || return 1
+  launchd_pid="$(fallback_launchd_pid)" || return 1
+  [ -n "$launchd_pid" ] && [ "$listener_pid" = "$launchd_pid" ]
+}
+installed_fallback_interface() {
+  local network_interface
+  network_interface="$(plist_argument_value "$FALLBACK_PLIST" --direct-interface)" || return 1
+  [[ "$network_interface" =~ ^en[0-9]+$ ]] || return 1
+  printf '%s\n' "$network_interface"
+}
+fallback_config_current() {
+  local upstream primary
+  upstream="$(plist_argument_value "$FALLBACK_PLIST" --upstream)" || return 1
+  primary="$(plist_argument_value "$FALLBACK_PLIST" --general-upstream)" || return 1
+  [ "$upstream" = "$SOCKS_HOST:$SOCKS_PORT" ] \
+    && [ "$primary" = "$SOCKS_HOST:$PRIMARY_PROXY_PORT" ]
+}
 owned_engine_pid() {
   local pid executable
   [ -f "$PIDFILE" ] || return 1
@@ -97,7 +310,7 @@ engine_process_running() { owned_engine_pid >/dev/null 2>&1; }
 svc_loaded() { launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; }
 
 probe_campus_http_code() {
-  curl -sS --proxy "socks5h://$SOCKS_HOST:$SOCKS_PORT" \
+  curl -sS --noproxy '' --proxy "socks5h://$SOCKS_HOST:$SOCKS_PORT" \
     --connect-timeout 3 --max-time 6 -o /dev/null -w '%{http_code}' \
     "$CAMPUS_PROBE_URL" 2>/dev/null
 }
@@ -153,10 +366,12 @@ write_pac() {
   mv "$temporary" "$PAC_FILE"
 }
 write_shadowrocket_module() {
-  [ -f "$SHADOWROCKET_TEMPLATE" ] || die "Shadowrocket module template is missing"
-  local temporary="$SHADOWROCKET_MODULE.$$.tmp"
+  local template="${1:-$SHADOWROCKET_TEMPLATE}" output="${2:-$SHADOWROCKET_MODULE}"
+  [ -f "$template" ] || die "Shadowrocket module template is missing"
+  local temporary="$output.$$.tmp"
   local route_marker='__ROUTE_IPV4_RULES__' tun_marker='__TUN_INCLUDED_ROUTES__'
-  local policy_route_count=0 route_index=0 route_count=0 tun_count=0 route_csv='' cidr line
+  local udp_marker='__UDP_REJECT_RULES__'
+  local policy_route_count=0 route_index=0 route_count=0 tun_count=0 udp_count=0 route_csv='' cidr line
   local -a routes=()
   if [ -f "$POLICY" ]; then
     policy_route_count="$(plutil -extract route_ipv4_cidrs raw -expect array -o - "$POLICY" 2>/dev/null)" \
@@ -167,7 +382,7 @@ write_shadowrocket_module() {
   while [ "$route_index" -lt "$policy_route_count" ]; do
     cidr="$(plutil -extract "route_ipv4_cidrs.$route_index" raw -expect string -o - "$POLICY" 2>/dev/null)" \
       || die "local network policy route[$route_index] must be a string"
-    [[ "$cidr" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([1-9]|[12][0-9]|3[0-2])$ ]] \
+    valid_ipv4_cidr "$cidr" \
       || die "local network policy route[$route_index] is invalid: $cidr"
     routes+=("$cidr")
     [ -z "$route_csv" ] && route_csv="$cidr" || route_csv="$route_csv, $cidr"
@@ -181,46 +396,336 @@ write_shadowrocket_module() {
         ;;
       "$route_marker")
         route_count=$((route_count + 1))
-        for cidr in "${routes[@]}"; do
+        for cidr in "${routes[@]-}"; do
+          [ -n "$cidr" ] || continue
           printf 'IP-CIDR,%s,HKUSTGZ,no-resolve\n' "$cidr" >> "$temporary"
+        done
+        ;;
+      "$udp_marker")
+        udp_count=$((udp_count + 1))
+        for cidr in "${routes[@]-}"; do
+          [ -n "$cidr" ] || continue
+          printf 'AND,((PROTOCOL,UDP),(IP-CIDR,%s,no-resolve)),REJECT-NO-DROP\n' "$cidr" >> "$temporary"
         done
         ;;
       *) printf '%s\n' "$line" >> "$temporary" ;;
     esac
-  done < "$SHADOWROCKET_TEMPLATE"
-  [ "$route_count" -eq 1 ] && [ "$tun_count" -eq 1 ] \
+  done < "$template"
+  [ "$route_count" -eq 1 ] && [ "$tun_count" -eq 1 ] && [ "$udp_count" -eq 1 ] \
     || { [ -f "$temporary" ] && mv "$temporary" "$temporary.failed"; die "Shadowrocket module template is invalid"; }
   chmod 600 "$temporary"
-  mv "$temporary" "$SHADOWROCKET_MODULE"
+  mv "$temporary" "$output"
 }
 
-probe_realtime_path() {
+write_mihomo_profile() {
+  [ -f "$MIHOMO_TEMPLATE" ] || die "Mihomo profile template is missing"
+  local temporary="$MIHOMO_PROFILE.$$.tmp"
+  local port_marker='__SOCKS_PORT__' domain_marker='__ROUTE_DOMAIN_RULES__'
+  local udp_marker='__UDP_REJECT_RULES__' ipv4_marker='__ROUTE_IPV4_RULES__'
+  local route_count=0 domain_count=0 udp_count=0 port_count=0
+  local policy_route_count=0 route_index=0 domain_total=0 domain_index=0 cidr domain line
+  local -a routes=() domains=()
+  if [ -f "$POLICY" ]; then
+    policy_route_count="$(plutil -extract route_ipv4_cidrs raw -expect array -o - "$POLICY" 2>/dev/null)" \
+      || die "local network policy is invalid: $POLICY"
+  fi
+  while [ "$route_index" -lt "$policy_route_count" ]; do
+    cidr="$(plutil -extract "route_ipv4_cidrs.$route_index" raw -expect string -o - "$POLICY" 2>/dev/null)" \
+      || die "local network policy route[$route_index] must be a string"
+    valid_ipv4_cidr "$cidr" \
+      || die "local network policy route[$route_index] is invalid: $cidr"
+    routes+=("$cidr")
+    route_index=$((route_index + 1))
+  done
+  domain_total="$(plutil -extract proxy.route_domains raw -expect array -o - "$ENGINE_CONFIG" 2>/dev/null)" \
+    || die "engine route-domain configuration is invalid"
+  while [ "$domain_index" -lt "$domain_total" ]; do
+    domain="$(plutil -extract "proxy.route_domains.$domain_index" raw -expect string -o - "$ENGINE_CONFIG" 2>/dev/null)" \
+      || die "engine route domain[$domain_index] must be a string"
+    [[ "$domain" =~ ^([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$ ]] \
+      || die "engine route domain[$domain_index] is invalid"
+    domains+=("$domain")
+    domain_index=$((domain_index + 1))
+  done
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *"$port_marker"*)
+        port_count=$((port_count + 1))
+        printf '%s\n' "${line//$port_marker/$SOCKS_PORT}" >> "$temporary"
+        ;;
+      "$udp_marker")
+        udp_count=$((udp_count + 1))
+        for domain in "${domains[@]-}"; do
+          [ -n "$domain" ] || continue
+          printf '  - AND,((DOMAIN-SUFFIX,%s),(NETWORK,udp)),REJECT\n' "$domain" >> "$temporary"
+        done
+        for cidr in "${routes[@]-}"; do
+          [ -n "$cidr" ] || continue
+          printf '  - AND,((IP-CIDR,%s,no-resolve),(NETWORK,udp)),REJECT\n' "$cidr" >> "$temporary"
+        done
+        ;;
+      "$domain_marker")
+        domain_count=$((domain_count + 1))
+        for domain in "${domains[@]-}"; do
+          [ -n "$domain" ] || continue
+          printf '  - DOMAIN-SUFFIX,%s,HKUSTGZ\n' "$domain" >> "$temporary"
+        done
+        ;;
+      "$ipv4_marker")
+        route_count=$((route_count + 1))
+        for cidr in "${routes[@]-}"; do
+          [ -n "$cidr" ] || continue
+          printf '  - IP-CIDR,%s,HKUSTGZ,no-resolve\n' "$cidr" >> "$temporary"
+        done
+        ;;
+      *) printf '%s\n' "$line" >> "$temporary" ;;
+    esac
+  done < "$MIHOMO_TEMPLATE"
+  [ "$port_count" -eq 1 ] && [ "$udp_count" -eq 1 ] \
+    && [ "$domain_count" -eq 1 ] && [ "$route_count" -eq 1 ] \
+    || { [ -f "$temporary" ] && mv "$temporary" "$temporary.failed"; die "Mihomo template is invalid"; }
+  chmod 600 "$temporary"
+  mv "$temporary" "$MIHOMO_PROFILE"
+}
+
+interface_active() {
+  local network_interface="$1"
+  [[ "$network_interface" =~ ^en[0-9]+$ ]] || return 1
+  /sbin/ifconfig "$network_interface" 2>/dev/null \
+    | grep -Eq '^[[:space:]]*status:[[:space:]]*active[[:space:]]*$'
+}
+select_physical_interface() {
+  local current_interface="$1" saved_interface="$2"
+  local current_active="$3" saved_active="$4"
+  if [[ "$current_interface" =~ ^en[0-9]+$ ]] && [ "$current_active" -eq 1 ]; then
+    printf '%s\n' "$current_interface"
+    return
+  fi
+  if [[ "$current_interface" =~ ^utun[0-9]+$ ]] \
+    && [[ "$saved_interface" =~ ^en[0-9]+$ ]] && [ "$saved_active" -eq 1 ]; then
+    printf '%s\n' "$saved_interface"
+    return
+  fi
+  return 1
+}
+preferred_physical_interface() {
+  local saved_interface="$1" current_interface current_active=0 saved_active=0
+  current_interface="$(/sbin/route -n get default 2>/dev/null \
+    | awk '/^[[:space:]]*interface:/{print $2; exit}')"
+  interface_active "$current_interface" && current_active=1
+  interface_active "$saved_interface" && saved_active=1
+  select_physical_interface \
+    "$current_interface" "$saved_interface" "$current_active" "$saved_active"
+}
+xml_escape() {
+  local value="$1"
+  if printf '%s' "$value" | LC_ALL=C grep -q '[[:cntrl:]]'; then return 1; fi
+  value="${value//&/&amp;}"
+  value="${value//</&lt;}"
+  value="${value//>/&gt;}"
+  printf '%s' "$value"
+}
+render_fallback_plist() {
+  local output="$1" direct_interface="$2"
+  local executable_xml label_xml upstream_xml primary_xml interface_xml stdout_xml stderr_xml
+  [[ "$direct_interface" =~ ^en[0-9]+$ ]] || return 1
+  executable_xml="$(xml_escape "$FALLBACK_INSTALL")" || return 1
+  label_xml="$(xml_escape "$FALLBACK_LABEL")" || return 1
+  upstream_xml="$(xml_escape "$SOCKS_HOST:$SOCKS_PORT")" || return 1
+  primary_xml="$(xml_escape "$SOCKS_HOST:$PRIMARY_PROXY_PORT")" || return 1
+  interface_xml="$(xml_escape "$direct_interface")" || return 1
+  stdout_xml="$(xml_escape "$RUNDIR/fallback.out.log")" || return 1
+  stderr_xml="$(xml_escape "$RUNDIR/fallback.err.log")" || return 1
+  printf '%s\n' \
+    '<?xml version="1.0" encoding="UTF-8"?>' \
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+    '<plist version="1.0"><dict>' \
+    "<key>Label</key><string>$label_xml</string>" \
+    '<key>ProgramArguments</key><array>' \
+    "<string>$executable_xml</string>" \
+    '<string>--listen</string><string>127.0.0.1:1081</string>' \
+    "<string>--upstream</string><string>$upstream_xml</string>" \
+    "<string>--general-upstream</string><string>$primary_xml</string>" \
+    "<string>--direct-interface</string><string>$interface_xml</string>" \
+    '</array>' \
+    '<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>' \
+    '<key>ThrottleInterval</key><integer>10</integer>' \
+    "<key>StandardOutPath</key><string>$stdout_xml</string>" \
+    "<key>StandardErrorPath</key><string>$stderr_xml</string>" \
+    '</dict></plist>' > "$output" || return 1
+  chmod 600 "$output" || return 1
+  plutil -lint "$output" >/dev/null 2>&1
+}
+replace_file_atomic() {
+  local source="$1" target="$2" mode="$3" directory temporary
+  directory="$(dirname "$target")"
+  temporary="$(mktemp "$directory/.${target##*/}.replace.XXXXXX")" || return 1
+  if ! install -m "$mode" "$source" "$temporary"; then
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! mv "$temporary" "$target"; then
+    rm -f "$temporary"
+    return 1
+  fi
+}
+restore_file_atomic() {
+  local source="$1" target="$2" directory temporary
+  directory="$(dirname "$target")"
+  temporary="$(mktemp "$directory/.${target##*/}.restore.XXXXXX")" || return 1
+  if ! cp -p "$source" "$temporary"; then
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! mv "$temporary" "$target"; then
+    rm -f "$temporary"
+    return 1
+  fi
+}
+bootout_fallback_service() {
+  launchctl bootout "gui/$(id -u)/$FALLBACK_LABEL" 2>/dev/null \
+    || ! fallback_service_loaded
+}
+
+FALLBACK_TX_ACTIVE=0
+FALLBACK_TX_DIR=''
+FALLBACK_TX_NEW_PLIST=''
+FALLBACK_TX_HAD_BIN=0
+FALLBACK_TX_HAD_PLIST=0
+FALLBACK_TX_WAS_LOADED=0
+FALLBACK_TX_SERVICE_STOPPED=0
+FALLBACK_TX_FILES_MUTATED=0
+
+fallback_transaction_begin() {
+  local new_plist="$1" rollback_dir
+  rollback_dir="$(mktemp -d "$RUNDIR/fallback-rollback.XXXXXX")" || return 1
+  chmod 700 "$rollback_dir" || { rm -rf "$rollback_dir"; return 1; }
+  FALLBACK_TX_DIR="$rollback_dir"
+  FALLBACK_TX_NEW_PLIST="$new_plist"
+  FALLBACK_TX_HAD_BIN=0
+  FALLBACK_TX_HAD_PLIST=0
+  FALLBACK_TX_WAS_LOADED=0
+  FALLBACK_TX_SERVICE_STOPPED=0
+  FALLBACK_TX_FILES_MUTATED=0
+  if [ -f "$FALLBACK_INSTALL" ]; then
+    cp -p "$FALLBACK_INSTALL" "$rollback_dir/ec-fallback" \
+      || { rm -rf "$rollback_dir"; return 1; }
+    FALLBACK_TX_HAD_BIN=1
+  fi
+  if [ -f "$FALLBACK_PLIST" ]; then
+    cp -p "$FALLBACK_PLIST" "$rollback_dir/$FALLBACK_LABEL.plist" \
+      || { rm -rf "$rollback_dir"; return 1; }
+    FALLBACK_TX_HAD_PLIST=1
+  fi
+  fallback_service_loaded && FALLBACK_TX_WAS_LOADED=1
+  FALLBACK_TX_ACTIVE=1
+  trap 'fallback_transaction_on_exit $?' EXIT
+  trap 'exit 130' HUP INT TERM
+}
+fallback_transaction_restore() {
+  local restore_failed=0
+  trap - EXIT
+  trap '' HUP INT TERM
+  FALLBACK_TX_ACTIVE=0
+  if [ "$FALLBACK_TX_SERVICE_STOPPED" -eq 1 ] && fallback_service_loaded; then
+    bootout_fallback_service || restore_failed=1
+  fi
+  if [ "$restore_failed" -eq 0 ] && [ "$FALLBACK_TX_FILES_MUTATED" -eq 1 ]; then
+    if [ "$FALLBACK_TX_HAD_BIN" -eq 1 ]; then
+      restore_file_atomic "$FALLBACK_TX_DIR/ec-fallback" "$FALLBACK_INSTALL" \
+        || restore_failed=1
+    else
+      [ ! -e "$FALLBACK_INSTALL" ] || rm -f "$FALLBACK_INSTALL" || restore_failed=1
+    fi
+    if [ "$FALLBACK_TX_HAD_PLIST" -eq 1 ]; then
+      restore_file_atomic "$FALLBACK_TX_DIR/$FALLBACK_LABEL.plist" "$FALLBACK_PLIST" \
+        || restore_failed=1
+    else
+      [ ! -e "$FALLBACK_PLIST" ] || rm -f "$FALLBACK_PLIST" || restore_failed=1
+    fi
+  fi
+  if [ "$restore_failed" -eq 0 ] && [ "$FALLBACK_TX_WAS_LOADED" -eq 1 ] \
+    && [ "$FALLBACK_TX_SERVICE_STOPPED" -eq 1 ]; then
+    launchctl bootstrap "gui/$(id -u)" "$FALLBACK_PLIST" >/dev/null 2>&1 \
+      && fallback_service_loaded \
+      || restore_failed=1
+  fi
+  rm -f "$FALLBACK_TX_NEW_PLIST" 2>/dev/null || true
+  if [ "$restore_failed" -ne 0 ]; then
+    printf 'error: previous relay restore failed; backup retained at %s\n' "$FALLBACK_TX_DIR" >&2
+    trap - HUP INT TERM
+    return 1
+  fi
+  rm -rf "$FALLBACK_TX_DIR" \
+    || printf 'warning: restored relay but could not remove backup %s\n' "$FALLBACK_TX_DIR" >&2
+  trap - HUP INT TERM
+  return 0
+}
+fallback_transaction_on_exit() {
+  local status="$1"
+  [ "$FALLBACK_TX_ACTIVE" -eq 1 ] || return
+  printf 'error: relay installation was interrupted; restoring previous state\n' >&2
+  fallback_transaction_restore || status=1
+  exit "$status"
+}
+fallback_transaction_abort() {
+  local message="$1" backup="$FALLBACK_TX_DIR"
+  if fallback_transaction_restore; then
+    die "$message; previous state restored"
+  fi
+  die "$message; previous state restore failed; backup retained at $backup"
+}
+fallback_transaction_commit() {
+  trap - EXIT HUP INT TERM
+  FALLBACK_TX_ACTIVE=0
+  rm -f "$FALLBACK_TX_NEW_PLIST" \
+    || printf 'warning: could not remove temporary relay plist %s\n' "$FALLBACK_TX_NEW_PLIST" >&2
+  rm -rf "$FALLBACK_TX_DIR" \
+    || printf 'warning: could not remove relay backup %s\n' "$FALLBACK_TX_DIR" >&2
+}
+
+probe_upgrade_shaped_https_path() {
   local host="$1" proxy="${2:-}" http_code
   local -a args=(--http1.1 --connect-timeout 4 --max-time 8 -sS -o /dev/null -w '%{http_code}'
     -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13'
     -H 'Sec-WebSocket-Key: aGt1c3Rnei1jb25uZWN0IQ==')
-  [ -z "$proxy" ] || args+=(--proxy "$proxy")
+  if [ -z "$proxy" ]; then
+    args+=(--noproxy '*')
+  else
+    args+=(--noproxy '' --proxy "$proxy")
+  fi
   http_code="$(curl "${args[@]}" "https://$host/" 2>/dev/null)" || true
   [ -n "$http_code" ] && [ "$http_code" != "000" ]
 }
 
 doctor_public_network() {
-  local failed=0 explicit_proxy="socks5h://$SOCKS_HOST:$SHADOWROCKET_PORT" host
+  local failed=0 differential=0 explicit_proxy="socks5h://$SOCKS_HOST:$PRIMARY_PROXY_PORT" host system_ok proxy_ok
+  printf 'primary proxy test endpoint: %s (%s)\n' "$explicit_proxy" "$PRIMARY_PROXY_SOURCE"
   for host in chatgpt.com ws.chatgpt.com; do
-    if probe_realtime_path "$host"; then
-      printf 'pass: %s system HTTPS/WebSocket path answered\n' "$host"
-    elif probe_realtime_path "$host" "$explicit_proxy"; then
-      printf 'fail: %s works through Shadowrocket SOCKS but not through the system/TUN path\n' "$host" >&2
-      failed=1
+    system_ok=0
+    proxy_ok=0
+    probe_upgrade_shaped_https_path "$host" && system_ok=1
+    probe_upgrade_shaped_https_path "$host" "$explicit_proxy" && proxy_ok=1
+    if [ "$system_ok" -eq 1 ]; then
+      printf 'pass: %s system/TUN returned an HTTP response to an Upgrade-shaped HTTPS request; persistent realtime was not verified\n' "$host"
     else
-      printf 'fail: %s is unreachable through both system and Shadowrocket SOCKS paths\n' "$host" >&2
+      printf 'fail: %s returned no HTTP response through the system/TUN path\n' "$host" >&2
       failed=1
     fi
+    if [ "$proxy_ok" -eq 1 ]; then
+      printf 'pass: %s returned an HTTP response through %s; persistent realtime was not verified\n' "$host" "$explicit_proxy"
+    else
+      printf 'fail: %s returned no HTTP response through %s\n' "$host" "$explicit_proxy" >&2
+      failed=1
+    fi
+    [ "$system_ok" -eq 1 ] || [ "$proxy_ok" -ne 1 ] || differential=1
   done
-  if [ "$failed" -ne 0 ]; then
-    printf 'review: Shadowrocket > Config > Modules must contain an enabled HKUST(GZ) Connect module\n' >&2
-    printf 'source: create a New Module and paste the contents of %s\n' "$SHADOWROCKET_MODULE" >&2
-    printf 'review: keep HKUSTGZ as a campus-only node, not the default proxy\n' >&2
+  if [ "$differential" -eq 1 ]; then
+    printf 'review: the explicit primary SOCKS path responds while the system/TUN path does not\n' >&2
+    printf 'review: if Shadowrocket owns that endpoint, replace the campus-only module with %s and keep exactly one enabled\n' "$SHADOWROCKET_MODULE" >&2
+    printf 'verify: retest persistent streaming in the affected app; these probes verify HTTPS reachability only\n' >&2
+  elif [ "$failed" -ne 0 ]; then
+    printf 'review: no repair-preset differential was established; verify the printed SOCKS endpoint, DNS, and upstream before changing global policy\n' >&2
   fi
   return "$failed"
 }
@@ -268,6 +773,77 @@ run_engine() {
   wait "$engine_pid"
 }
 
+install_fallback_relay() {
+  local direct_interface new_plist relay_ready=0
+  [ "$SOCKS_PORT" != "$FALLBACK_PORT" ] && [ "$SOCKS_PORT" != "$PRIMARY_PROXY_PORT" ] \
+    && [ "$FALLBACK_PORT" != "$PRIMARY_PROXY_PORT" ] \
+    || die "campus, relay, and primary proxy ports must be different"
+  write_shadowrocket_module
+  ensure_fallback
+  if fallback_port_listening && ! fallback_relay_listening; then
+    die "relay port $FALLBACK_PORT is owned by another process or unmanaged relay"
+  fi
+  direct_interface="$(preferred_physical_interface \
+    "$(installed_fallback_interface 2>/dev/null)")" \
+    || die "cannot identify a physical default interface; disable the primary TUN briefly and retry"
+  mkdir -p "$RUNDIR/bin" "$(dirname "$FALLBACK_PLIST")" \
+    || die "could not create relay directories"
+  chmod 700 "$RUNDIR/bin" || die "could not secure the relay binary directory"
+  for relay_target in "$FALLBACK_INSTALL" "$FALLBACK_PLIST"; do
+    regular_file_or_absent "$relay_target" \
+      || die "relay state must use regular files: $relay_target"
+  done
+  new_plist="$(mktemp "$RUNDIR/$FALLBACK_LABEL.plist.new.XXXXXX")" \
+    || die "could not create a temporary relay LaunchAgent"
+  render_fallback_plist "$new_plist" "$direct_interface" \
+    || { rm -f "$new_plist"; die "could not render a valid relay LaunchAgent"; }
+  fallback_transaction_begin "$new_plist" \
+    || { rm -f "$new_plist"; die "could not preserve the current relay state"; }
+  if fallback_service_loaded; then
+    if ! bootout_fallback_service; then
+      fallback_service_loaded || FALLBACK_TX_SERVICE_STOPPED=1
+      fallback_transaction_abort "could not stop the previous compatibility relay"
+    fi
+    FALLBACK_TX_SERVICE_STOPPED=1
+  fi
+  replace_file_atomic "$FALLBACK_BIN" "$FALLBACK_INSTALL" 755 \
+    || fallback_transaction_abort "could not install the compatibility relay executable"
+  FALLBACK_TX_FILES_MUTATED=1
+  replace_file_atomic "$new_plist" "$FALLBACK_PLIST" 600 \
+    || fallback_transaction_abort "could not install the compatibility relay LaunchAgent"
+  FALLBACK_TX_SERVICE_STOPPED=1
+  launchctl bootstrap "gui/$(id -u)" "$FALLBACK_PLIST" >/dev/null 2>&1 \
+    || fallback_transaction_abort "could not load the compatibility relay LaunchAgent"
+  for _ in $(seq 1 20); do
+    if fallback_relay_listening; then relay_ready=1; break; fi
+    sleep 0.1
+  done
+  [ "$relay_ready" -eq 1 ] \
+    || fallback_transaction_abort "compatibility relay did not claim $SOCKS_HOST:$FALLBACK_PORT as the LaunchAgent PID"
+  fallback_transaction_commit
+  printf 'compatibility relay installed on %s:%s; module: %s\n' \
+    "$SOCKS_HOST" "$FALLBACK_PORT" "$SHADOWROCKET_MODULE"
+  printf 'primary proxy endpoint: socks5h://%s:%s (%s)\n' \
+    "$SOCKS_HOST" "$PRIMARY_PROXY_PORT" "$PRIMARY_PROXY_SOURCE"
+}
+
+uninstall_fallback_relay() {
+  local relay_target remove_failed=0
+  for relay_target in "$FALLBACK_INSTALL" "$FALLBACK_PLIST"; do
+    regular_file_or_absent "$relay_target" \
+      || die "relay state must use regular files: $relay_target"
+  done
+  bootout_fallback_service || die "could not stop the compatibility relay"
+  for relay_target in "$FALLBACK_PLIST" "$FALLBACK_INSTALL"; do
+    if [ -f "$relay_target" ] && ! rm -f "$relay_target"; then
+      printf 'error: could not remove %s\n' "$relay_target" >&2
+      remove_failed=1
+    fi
+  done
+  [ "$remove_failed" -eq 0 ] || die "compatibility relay removal was incomplete"
+  printf 'compatibility relay removed\n'
+}
+
 case "${1:-}" in
   configure)
     username="${2:-}"
@@ -294,13 +870,7 @@ case "${1:-}" in
     source_policy="${2:-}"
     [ -n "$source_policy" ] || die "usage: $(basename "$0") set-policy FILE"
     [ -f "$source_policy" ] || die "network policy file does not exist: $source_policy"
-    version="$(plutil -extract version raw -expect integer -o - "$source_policy" 2>/dev/null)" \
-      || die "network policy must contain integer version 1"
-    [ "$version" = "1" ] || die "network policy version must be 1"
-    plutil -extract vpn_dns_servers raw -expect array -o - "$source_policy" >/dev/null 2>&1 \
-      || die "network policy must contain a vpn_dns_servers array"
-    plutil -extract route_ipv4_cidrs raw -expect array -o - "$source_policy" >/dev/null 2>&1 \
-      || die "network policy must contain a route_ipv4_cidrs array"
+    validate_policy_file "$source_policy"
     mkdir -p "$CONFIG_HOME"
     chmod 700 "$CONFIG_HOME"
     temporary="$POLICY.$$.tmp"
@@ -392,7 +962,21 @@ case "${1:-}" in
     if [ -n "$ACC" ] && get_pw >/dev/null 2>&1; then printf 'Keychain password: present\n'; else printf 'Keychain password: missing\n'; fi
     [ -x "$ENGINE" ] && printf 'engine: available\n' || printf 'engine: not built\n'
     [ -f "$POLICY" ] && printf 'local network policy: present\n' || printf 'local network policy: not installed (public domains only)\n'
-    fallback_listening && printf 'Shadowrocket relay: %s:%s\n' "$SOCKS_HOST" "$FALLBACK_PORT" || printf 'Shadowrocket relay: not running\n'
+    printf 'primary proxy endpoint: SOCKS5 %s:%s (%s)\n' \
+      "$SOCKS_HOST" "$PRIMARY_PROXY_PORT" "$PRIMARY_PROXY_SOURCE"
+    if fallback_relay_listening; then
+      if fallback_config_current; then
+        printf 'compatibility relay: %s:%s (owned by ec-fallback)\n' "$SOCKS_HOST" "$FALLBACK_PORT"
+      else
+        printf 'compatibility relay: running with previous ports; install-fallback required\n'
+      fi
+    elif fallback_port_listening; then
+      printf 'compatibility relay: blocked; port %s is owned by another process\n' "$FALLBACK_PORT"
+    elif [ -f "$FALLBACK_PLIST" ]; then
+      printf 'compatibility relay: installed but not running\n'
+    else
+      printf 'compatibility relay: not installed\n'
+    fi
     ;;
 
   test)
@@ -411,44 +995,60 @@ case "${1:-}" in
     printf '%s\n' "$SHADOWROCKET_MODULE"
     ;;
 
+  shadowrocket-repair-module)
+    write_shadowrocket_module "$SHADOWROCKET_REPAIR_TEMPLATE" "$SHADOWROCKET_REPAIR_MODULE"
+    printf '%s\n' "$SHADOWROCKET_REPAIR_MODULE"
+    ;;
+
+  mihomo-profile|clash-profile)
+    write_mihomo_profile
+    printf '%s\n' "$MIHOMO_PROFILE"
+    ;;
+
   doctor-public)
-    write_shadowrocket_module
+    write_shadowrocket_module "$SHADOWROCKET_REPAIR_TEMPLATE" "$SHADOWROCKET_REPAIR_MODULE"
+    SHADOWROCKET_MODULE="$SHADOWROCKET_REPAIR_MODULE"
     doctor_public_network
     ;;
 
   install-fallback)
-    ensure_fallback
-    mkdir -p "$RUNDIR/bin" "$(dirname "$FALLBACK_PLIST")"
-    install -m 755 "$FALLBACK_BIN" "$FALLBACK_INSTALL"
-    printf '%s\n' \
-      '<?xml version="1.0" encoding="UTF-8"?>' \
-      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-      '<plist version="1.0"><dict>' \
-      "<key>Label</key><string>$FALLBACK_LABEL</string>" \
-      '<key>ProgramArguments</key><array>' \
-      "<string>$FALLBACK_INSTALL</string>" \
-      '<string>--listen</string><string>127.0.0.1:1081</string>' \
-      "<string>--upstream</string><string>127.0.0.1:$SOCKS_PORT</string>" \
-      "<string>--general-upstream</string><string>127.0.0.1:$SHADOWROCKET_PORT</string>" \
-      '<string>--direct-interface</string><string>en0</string>' \
-      '</array>' \
-      '<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>' \
-      "<key>StandardOutPath</key><string>$RUNDIR/fallback.out.log</string>" \
-      "<key>StandardErrorPath</key><string>$RUNDIR/fallback.err.log</string>" \
-      '</dict></plist>' > "$FALLBACK_PLIST"
-    chmod 600 "$FALLBACK_PLIST"
-    launchctl bootout "gui/$(id -u)/$FALLBACK_LABEL" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$FALLBACK_PLIST" \
-      || die "could not load the Shadowrocket fallback relay"
-    write_shadowrocket_module
-    printf 'Shadowrocket relay installed on %s:%s; module: %s\n' \
-      "$SOCKS_HOST" "$FALLBACK_PORT" "$SHADOWROCKET_MODULE"
+    run_with_relay_lock install_fallback_relay
     ;;
 
   uninstall-fallback)
-    launchctl bootout "gui/$(id -u)/$FALLBACK_LABEL" 2>/dev/null || true
-    [ -f "$FALLBACK_PLIST" ] && mv "$FALLBACK_PLIST" "$RUNDIR/$FALLBACK_LABEL.plist.uninstalled"
-    printf 'Shadowrocket fallback relay removed\n'
+    run_with_relay_lock uninstall_fallback_relay
+    ;;
+
+  __test-primary-proxy)
+    printf '%s|%s\n' "$PRIMARY_PROXY_PORT" "$PRIMARY_PROXY_SOURCE"
+    ;;
+
+  __test-campus-probe)
+    probe_data_plane || die "campus data path probe failed"
+    printf '%s\n' "$PROBE_SUMMARY"
+    ;;
+
+  __test-render-fallback-plist)
+    test_output="${2:-}"
+    test_interface="${3:-en0}"
+    [ -n "$test_output" ] || die "test output path is required"
+    render_fallback_plist "$test_output" "$test_interface" \
+      || die "could not render test relay LaunchAgent"
+    ;;
+
+  __test-fallback-owned)
+    fallback_relay_listening || die "fallback listener is not owned by the LaunchAgent"
+    printf 'owned\n'
+    ;;
+
+  __test-select-physical-interface)
+    test_current="${2:-}"
+    test_saved="${3:-}"
+    test_current_active="${4:-0}"
+    test_saved_active="${5:-0}"
+    select_physical_interface \
+      "$test_current" "$test_saved" "$test_current_active" "$test_saved_active" \
+      || die "no physical interface selected"
     ;;
 
   install)
@@ -502,8 +1102,10 @@ case "${1:-}" in
       '  status                       verify listener ownership and campus access' \
       '  test                         run the approved campus data-path probe' \
       '  pac                          generate the campus-only PAC file' \
-      '  shadowrocket-module          generate secure DNS and campus-only rules' \
-      '  doctor-public                test ChatGPT/Codex realtime network paths' \
+      '  shadowrocket-module          generate the minimal campus-only module' \
+      '  shadowrocket-repair-module   generate opt-in realtime and DNS repair rules' \
+      '  mihomo-profile               generate a Clash/Mihomo merge snippet' \
+      '  doctor-public                compare public HTTPS prerequisite paths' \
       '  install-fallback             install the Shadowrocket coexistence relay' \
       '  uninstall-fallback           remove the Shadowrocket coexistence relay' \
       '  logs                         follow CLI-owned engine logs' \

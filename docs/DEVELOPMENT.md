@@ -6,7 +6,7 @@
 | --- | --- |
 | `engine/` | Rust gateway protocol, network stack, SOCKS5, relay, fixtures |
 | `cli/` | macOS lifecycle client and local templates |
-| `desktop/` | Electron menu-bar app, isolated browser, tests, packaging |
+| `desktop/` | Electron menu-bar app, network integrations, tests, packaging |
 | `config/` | Public gateway profile and empty local-policy schema |
 | `scripts/` | Public-tree audit and release assembly |
 | `.github/workflows/` | CI and tag release automation |
@@ -65,15 +65,19 @@ authorizing Electron `safeStorage` access to Keychain.
 
 ## Release checklist
 
-1. Update versions in root and desktop manifests and add the changelog entry.
+1. Update versions in the root, desktop, and engine manifests; update the
+   desktop and Cargo lockfiles; then add the changelog entry.
 2. Pass format, lint, Rust tests, Node tests, shell syntax, and public audit.
 3. Build the engine once from the committed lockfile.
 4. Package and verify the app and CLI archive. Confirm both contain `LICENSE`,
    `LICENSES/`, `NOTICE.md`, `PROVENANCE.md`, and `THIRD_PARTY_NOTICES.md`; the
    desktop must also contain Electron and Chromium notices.
 5. Run approved coexistence canaries in both start orders.
-6. Run `doctor-public` with Shadowrocket active and confirm the direct
-   HTTPS/WebSocket path no longer differs from explicit SOCKS.
+6. Run `doctor-public` with Shadowrocket active and record the system/TUN and
+   explicit primary SOCKS HTTPS results separately. If repair is indicated by a
+   system/TUN failure and primary SOCKS success, install it and verify sustained
+   operation in the affected application; the probe does not prove a WebSocket
+   upgrade or persistent stream.
 7. Generate `SHA256SUMS.txt` from the exact upload artifacts.
 8. Review `git ls-files` and `git diff --cached` for private material; run the
    RFC 1918 and identity audit immediately before tagging.

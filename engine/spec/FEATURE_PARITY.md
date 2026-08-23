@@ -32,9 +32,10 @@ enabled that feature.
 | User information | Login history, server messages and announcements | Not implemented | Read-only optional providers |
 | Client lifecycle | Version mismatch, module update and client update | Public package watcher exists; no end-user updater | Signed update manifest with staged rollout and rollback |
 | Diagnostics | Environment checks, service status and logs | Safe local logs and basic telemetry | Add one-click redacted diagnostic bundle |
-| Network integration | L3 system tunnel, DNS service control, proxy checks and browser integration | Explicit SOCKS/PAC with no embedded browser | Do not copy global DNS mutation; add system integration only as a reversible, opt-in frontend |
+| Network integration | L3 system tunnel, DNS service control, proxy checks and browser integration | Explicit SOCKS/PAC with no embedded browser; campus-only Shadowrocket and Mihomo exports | Preserve application scope; keep global DNS/route mutation opt-in and reversible |
+| Other network services | Reviewed active L3 profile owns the institution VPN path while enabled | Existing primary proxy and Tailscale policy remain untouched by default | Test route overlap; never promise conflict-free operation or rewrite third-party state |
 | Multi-server profiles | Server history and server switching | Gateway is fixed by reviewed configuration | Institution-managed profiles may be added without changing protocol modules |
-| Accessibility/i18n | Chinese/English UI and ordinary-user resource pages | README bilingual; app currently Chinese | Move strings to locale files before adding more challenge screens |
+| Accessibility/i18n | Chinese/English UI and ordinary-user resource pages | App and current public guide are English; strings are not yet localized | Move strings to locale files before adding more challenge screens |
 
 ## What is deliberately different from EasyConnect
 
@@ -51,6 +52,17 @@ The default frontend is application-scoped:
 4. the operating-system DNS, global proxy and default route remain unchanged;
 5. off-campus browser routing is enabled only when the user explicitly applies
    the generated PAC URL or a compatible proxy rule.
+
+For students who already use Shadowrocket or Clash/Mihomo, the project emits
+campus-scoped configuration rather than replacing their complete policy. The
+default Shadowrocket preset preserves existing DNS and IPv6 settings; a
+separate Realtime/DNS repair preset may change those settings only after the
+system/TUN HTTPS check fails and the explicit primary SOCKS HTTPS check succeeds.
+These checks accept any HTTP response to a WebSocket-shaped request and do not
+prove a persistent WebSocket or application stream. Tailscale routes, MagicDNS
+and exit-node state are never rewritten. This smaller ownership surface
+improves coexistence for the supported workflow, but overlapping TUN routes
+remain an operating-system and policy decision.
 
 An optional system-wide mode is acceptable only if it snapshots the exact
 pre-connection state, writes changes transactionally, restores them on normal

@@ -26,12 +26,27 @@ engine.
 | UDP via SOCKS5 | current target returned no response | header/DNS/fragment/lifecycle fixtures | UDP ASSOCIATE relay; close remains healthy | reachable live UDP service pending |
 | Default-browser Quick Access | official external-browser flow | campus URL allowlist fixtures | OS browser launch; routing remains user-managed | reviewed links launch successfully |
 | Domain-selective PAC | campus page loaded through PAC | exact/suffix/no-DNS fixtures | advanced integration endpoint | isolated Chrome pass |
+| Application-scoped network ownership | default route and system DNS unchanged | settings and package assertions | loopback SOCKS/PAC default | not an official-client parity goal |
+| Shadowrocket campus-only export | local relay and module route exercised | minimal-policy, private-CIDR and UDP-reject fixtures | desktop + CLI generator; user-level relay | not applicable |
+| Shadowrocket Realtime/DNS repair | separate system/TUN and explicit primary SOCKS HTTPS reachability evidence required; persistent-app canary pending | repair-preset and guide fixtures | opt-in DNS/IPv6/OpenAI policy; never default | not applicable |
+| Clash/Mihomo export | manual live profile canary pending | ordered process/gateway direct, UDP reject and campus-route fixtures | merge snippet; subscription and `MATCH` remain user-owned | not applicable |
+| Tailscale coexistence | no automatic configuration mutation | documentation and diagnostic-label assertions | route capture is reported; MagicDNS/routes/exit node untouched | not applicable |
 | VPN-side DNS | no DNS server in current profile | DNS codec fixtures | used when supplied | not applicable to current profile |
 | Explicit system DNS fallback | enabled by reviewed current profile | domain validation fixtures | modular Rust resolver | live domain CONNECT passed |
 | Logout | live HTTP 200 | state test | Rust probe | live pass |
 | Reset/reconnect | live server reset | state test | bounded reset retry | reset path confirmed |
 | Timeout/data-plane recovery | process-level restart contract | bounded timeout tests pending | unhealthy engine exits | sleep/resume canary pending |
 | Passive logout / forced upgrade | official package capability | pending | text error only; structured event pending | pending |
+
+The coexistence rows verify ownership boundaries and generated configuration,
+not universal compatibility. A live matrix still needs representative
+Shadowrocket/Mihomo TUN modes, Tailscale exit-node and subnet-route cases, and
+non-overlapping as well as overlapping private CIDRs before those combinations
+can be promoted beyond documented, user-managed integration.
+
+The public-path checks accept any HTTP response to a WebSocket-shaped HTTPS
+request. They establish path reachability only, not a successful protocol
+upgrade, sustained WebSocket frames, or application streaming.
 
 Use `yes` only for evidence that can be reproduced. A production feature is
 supported only when the project-engine and official-client-parity columns

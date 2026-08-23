@@ -16,14 +16,21 @@ ARCHIVE="$ROOT/dist/$NAME.tar.gz"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/cli" "$STAGE/config" "$STAGE/engine/bin"
 cp "$ROOT/cli/hkustgzconnect" "$ROOT/cli/campus-only.pac.template" \
-  "$ROOT/desktop/assets/shadowrocket-hkustgz.module.template" "$STAGE/cli/"
+  "$ROOT/desktop/assets/shadowrocket-hkustgz.module.template" \
+  "$ROOT/desktop/assets/shadowrocket-hkustgz-repair.module.template" \
+  "$ROOT/desktop/assets/mihomo-hkustgz.yaml.template" "$STAGE/cli/"
 cp "$ROOT/cli/config.toml.example" "$ROOT/cli/com.hkustgz.connect-fallback.plist.example" "$STAGE/cli/"
 cp "$ROOT/config/hkustgz.json" "$ROOT/config/policy.json.example" "$STAGE/config/"
 cp "$ROOT/engine/target/release/ec-engine" "$STAGE/engine/bin/ec-engine-darwin-$ARCH"
 cp "$ROOT/engine/target/release/ec-fallback" "$STAGE/engine/bin/ec-fallback-darwin-$ARCH"
 cp "$ROOT/engine/target/release/ec-ssh-route" "$STAGE/engine/bin/ec-ssh-route-darwin-$ARCH"
-cp "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/NOTICE.md" \
-  "$ROOT/PROVENANCE.md" "$ROOT/THIRD_PARTY_NOTICES.md" "$STAGE/"
+cp "$ROOT/README.md" "$ROOT/SECURITY.md" "$ROOT/CONTRIBUTING.md" \
+  "$ROOT/LICENSE" "$ROOT/NOTICE.md" "$ROOT/PROVENANCE.md" \
+  "$ROOT/THIRD_PARTY_NOTICES.md" "$STAGE/"
+cp -R "$ROOT/docs" "$STAGE/"
+cp "$ROOT/engine/README.md" "$ROOT/engine/ARCHITECTURE.md" \
+  "$ROOT/engine/SCHOOL_DEPLOYMENT.md" "$STAGE/engine/"
+cp -R "$ROOT/engine/spec" "$STAGE/engine/"
 cp -R "$ROOT/LICENSES" "$STAGE/"
 chmod 755 "$STAGE/cli/hkustgzconnect" "$STAGE/engine/bin/"*
 for binary in "$STAGE/engine/bin/"*; do

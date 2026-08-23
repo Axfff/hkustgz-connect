@@ -1,6 +1,6 @@
 {
   "name": "hkustgzconnect",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "HKUST(GZ) EasyConnect-compatible client with a bundled Rust engine",
   "main": "main.js",
   "author": "HKUST(GZ) Connect contributors",
@@ -53,7 +53,7 @@
       {
         "from": "engine",
         "to": "engine",
-        "filter": ["ec-engine-*", "ec-engine.exe", "ec-ssh-route-*", "ec-ssh-route.exe", "hkustgz.json"]
+        "filter": ["ec-engine-*", "ec-engine.exe", "ec-fallback-*", "ec-fallback.exe", "ec-ssh-route-*", "ec-ssh-route.exe", "hkustgz.json"]
       }
     ],
     "mac": {

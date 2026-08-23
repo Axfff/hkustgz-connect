@@ -23,8 +23,11 @@ const requiredEntries = [
   '/preload.js',
   '/build/trayTemplate.png',
   '/lib/diagnostics.js',
+  '/lib/fallback-service.js',
   '/lib/hpc-ssh.js',
   '/lib/shadowrocket-module.js',
+  '/lib/mihomo-profile.js',
+  '/lib/network-guides.js',
   '/lib/network-policy.js',
   '/lib/presentation-state.js',
   '/lib/settings-update.js',
@@ -34,6 +37,8 @@ const requiredEntries = [
   '/renderer/styles.css',
   '/assets/campus-resources.json',
   '/assets/shadowrocket-hkustgz.module.template',
+  '/assets/shadowrocket-hkustgz-repair.module.template',
+  '/assets/mihomo-hkustgz.yaml.template',
 ];
 for (const entry of requiredEntries) {
   if (!entries.has(entry)) throw new Error(`missing required packaged file: ${entry}`);
@@ -66,9 +71,15 @@ if (!fs.existsSync(helper) || fs.statSync(helper).size === 0) {
   throw new Error(`missing packaged HPC SSH helper: ${helper}`);
 }
 
+const relayName = `ec-fallback-${platformName}-${architectureName}${extension}`;
+const relay = path.join(resources, 'engine', relayName);
+if (!fs.existsSync(relay) || fs.statSync(relay).size === 0) {
+  throw new Error(`missing packaged compatibility relay: ${relay}`);
+}
+
 if (platformName === 'darwin') {
   const expectedCpu = architectureName === 'arm64' ? 0x0100000c : 0x01000007;
-  for (const executable of [engine, helper]) {
+  for (const executable of [engine, helper, relay]) {
     const header = fs.readFileSync(executable).subarray(0, 8);
     const magic = header.length >= 8 ? header.readUInt32LE(0) : -1;
     const cpuType = header.length >= 8 ? header.readUInt32LE(4) : -1;
@@ -80,7 +91,7 @@ if (platformName === 'darwin') {
   }
 } else if (platformName === 'windows') {
   const expectedMachine = architectureName === 'arm64' ? 0xaa64 : 0x8664;
-  for (const executable of [engine, helper]) {
+  for (const executable of [engine, helper, relay]) {
     const header = fs.readFileSync(executable);
     const peOffset = header.length >= 0x40 ? header.readUInt32LE(0x3c) : -1;
     const signature = peOffset >= 0 && peOffset + 6 <= header.length

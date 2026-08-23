@@ -1,0 +1,45 @@
+#!name=HKUST(GZ) Connect
+#!desc=Opt-in realtime/DNS repair; replace campus-only and enable exactly one module
+#!system=macOS
+
+[General]
+ipv6 = false
+prefer-ipv6 = false
+dns-server = https://dns.google/dns-query#proxy
+fallback-dns-server = https://1.1.1.1/dns-query#proxy
+dns-direct-system = false
+dns-fallback-system = false
+dns-direct-fallback-proxy = true
+private-ip-answer = true
+hijack-dns = :53
+__TUN_INCLUDED_ROUTES__
+
+[Rule]
+# Keep public realtime and authentication traffic on the primary proxy.
+DOMAIN-SUFFIX,chatgpt.com,PROXY
+DOMAIN-SUFFIX,openai.com,PROXY
+DOMAIN-SUFFIX,oaistatic.com,PROXY
+DOMAIN-SUFFIX,oaiusercontent.com,PROXY
+DOMAIN-SUFFIX,oaistatsig.com,PROXY
+DOMAIN-SUFFIX,intercom.io,PROXY
+DOMAIN-SUFFIX,intercomcdn.com,PROXY
+DOMAIN,ct.sendgrid.net,PROXY
+DOMAIN,cdn.openaimerge.com,PROXY
+DOMAIN,cdn.workos.com,PROXY
+DOMAIN,challenges.cloudflare.com,PROXY
+DOMAIN,forwarder.workos.com,PROXY
+DOMAIN,humb.apple.com,PROXY
+DOMAIN,images.workoscdn.com,PROXY
+DOMAIN,js.stripe.com,PROXY
+DOMAIN,o207216.ingest.sentry.io,PROXY
+DOMAIN,o33249.ingest.sentry.io,PROXY
+DOMAIN,rum.browser-intake-datadoghq.com,PROXY
+DOMAIN,setup.workos.com,PROXY
+DOMAIN,workos.imgix.net,PROXY
+AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,hkust-gz.edu.cn)),REJECT-NO-DROP
+AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,hkust.edu.hk)),REJECT-NO-DROP
+__UDP_REJECT_RULES__
+DOMAIN,remote.hkust-gz.edu.cn,DIRECT
+DOMAIN-SUFFIX,hkust-gz.edu.cn,HKUSTGZ
+DOMAIN-SUFFIX,hkust.edu.hk,HKUSTGZ
+__ROUTE_IPV4_RULES__

@@ -7,6 +7,11 @@ function isCampusEngineExecutable(executable) {
   return /^ec-engine(?:-|$)/i.test(processName);
 }
 
+function isFallbackRelayExecutable(executable) {
+  const processName = executable ? path.basename(executable) : '';
+  return /^ec-fallback(?:-|$)/i.test(processName);
+}
+
 function describePortConflict({ port, pid, executable, campusHealthy = false }) {
   const processName = executable ? path.basename(executable) : '';
   const owner = Number.isInteger(pid) && pid > 0 ? `process ${pid}` : 'another process';
@@ -22,4 +27,4 @@ function describePortConflict({ port, pid, executable, campusHealthy = false }) 
   return `Port ${port} is already in use by ${namedOwner}. Choose a free SOCKS port in Settings or stop the owning application.`;
 }
 
-module.exports = { describePortConflict, isCampusEngineExecutable };
+module.exports = { describePortConflict, isCampusEngineExecutable, isFallbackRelayExecutable };
