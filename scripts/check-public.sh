@@ -13,18 +13,21 @@ for forbidden in \
   config.toml cred.bin settings.json campus-credentials.json \
   '*.pcap' '*.pcapng' '*.har' '*.key' '*.pem'
 do
-  match="$(find . -type f -name "$forbidden" \
-    -not -path './desktop/node_modules/*' \
-    -not -path './desktop/release/*' \
-    -not -path './desktop/engine/*' \
-    -not -path './engine/target/*' \
-    -not -path './dist/*' -print -quit)"
+  match="$(find . \
+    \( -path './.git' \
+      -o -path './desktop/node_modules' \
+      -o -path './desktop/release' \
+      -o -path './desktop/engine' \
+      -o -path './engine/target' \
+      -o -path './dist' \) -prune \
+    -o -type f -name "$forbidden" -print -quit)"
   [ -z "$match" ] || fail "forbidden local/evidence file: $match"
 done
 
 if rg -n --hidden \
   -g '!scripts/check-public.sh' \
   -g '!scripts/check-release.sh' \
+  -g '!.git/**' \
   -g '!desktop/node_modules/**' \
   -g '!desktop/release/**' \
   -g '!desktop/engine/**' \
@@ -35,6 +38,7 @@ then
   fail 'machine path, private-key marker, RFC 1918 address, or local identity found'
 fi
 
+command -v file >/dev/null 2>&1 || fail "the 'file' command is required"
 while IFS= read -r candidate; do
   kind="$(file -b "$candidate")"
   case "$kind" in
@@ -42,12 +46,14 @@ while IFS= read -r candidate; do
       fail "compiled executable is present: $candidate"
       ;;
   esac
-done < <(find . -type f \
-  -not -path './desktop/node_modules/*' \
-  -not -path './desktop/release/*' \
-  -not -path './desktop/engine/*' \
-  -not -path './engine/target/*' \
-  -not -path './dist/*')
+done < <(find . \
+  \( -path './.git' \
+    -o -path './desktop/node_modules' \
+    -o -path './desktop/release' \
+    -o -path './desktop/engine' \
+    -o -path './engine/target' \
+    -o -path './dist' \) -prune \
+  -o -type f -print)
 
 cmp -s package.json desktop/package.json \
   && fail 'root and desktop manifests must remain distinct' \
