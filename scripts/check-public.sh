@@ -18,6 +18,9 @@ audit_error() {
 }
 trap 'audit_error "$LINENO" "$?"' ERR
 
+command -v rg >/dev/null 2>&1 || fail "the 'rg' command is required"
+command -v file >/dev/null 2>&1 || fail "the 'file' command is required"
+
 for forbidden in \
   config.toml cred.bin settings.json campus-credentials.json \
   '*.pcap' '*.pcapng' '*.har' '*.key' '*.pem'
@@ -47,7 +50,6 @@ then
   fail 'machine path, private-key marker, RFC 1918 address, or local identity found'
 fi
 
-command -v file >/dev/null 2>&1 || fail "the 'file' command is required"
 while IFS= read -r candidate; do
   kind="$(file -b "$candidate")"
   case "$kind" in
