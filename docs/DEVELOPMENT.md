@@ -72,10 +72,12 @@ authorizing Electron `safeStorage` access to Keychain.
    `LICENSES/`, `NOTICE.md`, `PROVENANCE.md`, and `THIRD_PARTY_NOTICES.md`; the
    desktop must also contain Electron and Chromium notices.
 5. Run approved coexistence canaries in both start orders.
-6. Generate `SHA256SUMS.txt` from the exact upload artifacts.
-7. Review `git ls-files` and `git diff --cached` for private material; run the
+6. Run `doctor-public` with Shadowrocket active and confirm the direct
+   HTTPS/WebSocket path no longer differs from explicit SOCKS.
+7. Generate `SHA256SUMS.txt` from the exact upload artifacts.
+8. Review `git ls-files` and `git diff --cached` for private material; run the
    RFC 1918 and identity audit immediately before tagging.
-8. Tag `vX.Y.Z`; the release workflow rebuilds and publishes the artifacts.
+9. Tag `vX.Y.Z`; the release workflow rebuilds and publishes the artifacts.
 
 Changes to source ancestry, copied code, source-reviewed implementations, or
 dependencies must update `PROVENANCE.md` and the applicable license files in

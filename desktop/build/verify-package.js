@@ -26,6 +26,7 @@ const requiredEntries = [
   '/lib/campus-browser.js',
   '/lib/campus-credential-vault.js',
   '/lib/diagnostics.js',
+  '/lib/shadowrocket-module.js',
   '/lib/network-policy.js',
   '/lib/presentation-state.js',
   '/lib/settings-update.js',
@@ -37,6 +38,7 @@ const requiredEntries = [
   '/renderer/campus-browser.js',
   '/renderer/campus-browser.css',
   '/assets/campus-resources.json',
+  '/assets/shadowrocket-hkustgz.module.template',
 ];
 for (const entry of requiredEntries) {
   if (!entries.has(entry)) throw new Error(`missing required packaged file: ${entry}`);

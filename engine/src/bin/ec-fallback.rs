@@ -22,6 +22,7 @@ const MAX_CONNECTIONS: usize = 256;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const UPSTREAM_TIMEOUT: Duration = Duration::from_millis(750);
 const DIRECT_TIMEOUT: Duration = Duration::from_secs(8);
+const CAMPUS_DOMAIN_SUFFIXES: &[&str] = &["hkust-gz.edu.cn", "hkust.edu.hk"];
 
 #[derive(Clone, Debug)]
 struct Target {
@@ -29,6 +30,13 @@ struct Target {
     host: String,
     literal: Option<Ipv4Addr>,
     port: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TargetClass {
+    CampusDomain,
+    PrivateLiteral,
+    General,
 }
 
 #[tokio::main]
@@ -47,9 +55,16 @@ async fn run() -> Result<()> {
     let upstream = argument(&args, "--upstream")?
         .parse::<SocketAddr>()
         .map_err(|_| Error("--upstream must be a socket address".into()))?;
+    let general_upstream = optional_argument(&args, "--general-upstream")?
+        .map(str::parse::<SocketAddr>)
+        .transpose()
+        .map_err(|_| Error("--general-upstream must be a socket address".into()))?;
     let direct_interface_name = argument(&args, "--direct-interface")?;
     let direct_interface = interface_index(direct_interface_name)?;
-    if !listen.ip().is_loopback() || !upstream.ip().is_loopback() {
+    if !listen.ip().is_loopback()
+        || !upstream.ip().is_loopback()
+        || general_upstream.is_some_and(|address| !address.ip().is_loopback())
+    {
         return Err(Error(
             "fallback listeners and upstreams must be loopback-only".into(),
         ));
@@ -63,7 +78,10 @@ async fn run() -> Result<()> {
         .map_err(|_| Error("cannot bind fallback SOCKS listener".into()))?;
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     println!(
-        "Fallback SOCKS5 listening on {listen}; campus upstream {upstream}; direct interface {direct_interface_name}"
+        "Fallback SOCKS5 listening on {listen}; campus upstream {upstream}; general upstream {}; direct interface {direct_interface_name}",
+        general_upstream
+            .map(|address| address.to_string())
+            .unwrap_or_else(|| "disabled".to_owned())
     );
     loop {
         let (client, peer) = listener.accept().await?;
@@ -76,7 +94,14 @@ async fn run() -> Result<()> {
         let resolver = Arc::clone(&resolver);
         tokio::spawn(async move {
             let _slot = slot;
-            if let Err(error) = handle(client, upstream, direct_interface, resolver.as_ref()).await
+            if let Err(error) = handle(
+                client,
+                upstream,
+                general_upstream,
+                direct_interface,
+                resolver.as_ref(),
+            )
+            .await
             {
                 eprintln!("fallback request failed: {error}");
             }
@@ -102,19 +127,47 @@ fn argument<'a>(args: &'a [String], name: &str) -> Result<&'a str> {
         .ok_or_else(|| Error(format!("missing required argument: {name}")))
 }
 
+fn optional_argument<'a>(args: &'a [String], name: &str) -> Result<Option<&'a str>> {
+    let Some(index) = args.iter().position(|arg| arg == name) else {
+        return Ok(None);
+    };
+    args.get(index + 1)
+        .filter(|value| !value.starts_with("--"))
+        .map(String::as_str)
+        .map(Some)
+        .ok_or_else(|| Error(format!("missing value for argument: {name}")))
+}
+
 async fn handle(
     mut client: TcpStream,
     upstream: SocketAddr,
+    general_upstream: Option<SocketAddr>,
     direct_interface: NonZeroU32,
     resolver: &dyn NameResolver,
 ) -> Result<()> {
     let target = tokio::time::timeout(HANDSHAKE_TIMEOUT, read_request(&mut client))
         .await
         .map_err(|_| Error("fallback SOCKS handshake timed out".into()))??;
-    let routed = match tokio::time::timeout(UPSTREAM_TIMEOUT, via_upstream(upstream, &target)).await
-    {
-        Ok(Ok(stream)) => Ok(stream),
-        _ => via_direct(&target, direct_interface, resolver).await,
+    let routed = match classify_target(&target) {
+        TargetClass::CampusDomain => {
+            match tokio::time::timeout(UPSTREAM_TIMEOUT, via_upstream(upstream, &target)).await {
+                Ok(Ok(stream)) => Ok(stream),
+                _ => via_direct(&target, direct_interface, resolver).await,
+            }
+        }
+        TargetClass::PrivateLiteral => {
+            tokio::time::timeout(UPSTREAM_TIMEOUT, via_upstream(upstream, &target))
+                .await
+                .map_err(|_| Error("campus SOCKS connection timed out".into()))?
+        }
+        TargetClass::General => match general_upstream {
+            Some(address) => tokio::time::timeout(DIRECT_TIMEOUT, via_upstream(address, &target))
+                .await
+                .map_err(|_| Error("general SOCKS connection timed out".into()))?,
+            None => Err(Error(
+                "non-campus destination requires --general-upstream".into(),
+            )),
+        },
     };
     let mut remote = match routed {
         Ok(stream) => stream,
@@ -138,6 +191,24 @@ async fn handle(
             Ok(())
         }
         Err(_) => Err(Error("fallback stream forwarding failed".into())),
+    }
+}
+
+fn is_campus_domain(host: &str) -> bool {
+    CAMPUS_DOMAIN_SUFFIXES.iter().any(|suffix| {
+        host == *suffix
+            || host
+                .strip_suffix(suffix)
+                .is_some_and(|prefix| prefix.ends_with('.'))
+    })
+}
+
+fn classify_target(target: &Target) -> TargetClass {
+    match target.literal {
+        Some(address) if is_private_destination(address) => TargetClass::PrivateLiteral,
+        Some(_) => TargetClass::General,
+        None if is_campus_domain(&target.host) => TargetClass::CampusDomain,
+        None => TargetClass::General,
     }
 }
 
@@ -207,9 +278,7 @@ async fn via_upstream(upstream: SocketAddr, target: &Target) -> Result<TcpStream
     let mut greeting = [0_u8; 2];
     stream.read_exact(&mut greeting).await?;
     if greeting != [SOCKS_VERSION, NO_AUTH] {
-        return Err(Error(
-            "campus SOCKS rejected fallback authentication".into(),
-        ));
+        return Err(Error("upstream SOCKS rejected authentication".into()));
     }
     let mut request = vec![SOCKS_VERSION, CONNECT, 0];
     request.extend_from_slice(&target.encoded);
@@ -222,7 +291,7 @@ async fn consume_reply(stream: &mut TcpStream) -> Result<()> {
     let mut header = [0_u8; 4];
     stream.read_exact(&mut header).await?;
     if header[0] != SOCKS_VERSION || header[1] != 0 {
-        return Err(Error("campus SOCKS could not reach destination".into()));
+        return Err(Error("upstream SOCKS could not reach destination".into()));
     }
     match header[3] {
         IPV4 => {
@@ -240,7 +309,7 @@ async fn consume_reply(stream: &mut TcpStream) -> Result<()> {
         }
         _ => {
             return Err(Error(
-                "campus SOCKS returned an invalid address type".into(),
+                "upstream SOCKS returned an invalid address type".into(),
             ));
         }
     }
@@ -294,6 +363,15 @@ fn is_private_destination(address: Ipv4Addr) -> bool {
 mod tests {
     use super::*;
 
+    fn target(host: &str, literal: Option<Ipv4Addr>) -> Target {
+        Target {
+            encoded: Vec::new(),
+            host: host.to_owned(),
+            literal,
+            port: 443,
+        }
+    }
+
     #[test]
     fn private_and_non_routable_destinations_are_fail_closed() {
         assert!(is_private_destination(Ipv4Addr::new(192, 168, 1, 1)));
@@ -301,5 +379,39 @@ mod tests {
         assert!(is_private_destination(Ipv4Addr::LOCALHOST));
         assert!(is_private_destination(Ipv4Addr::new(169, 254, 1, 1)));
         assert!(!is_private_destination(Ipv4Addr::new(192, 0, 2, 1)));
+    }
+
+    #[test]
+    fn only_exact_campus_suffixes_use_the_campus_domain_route() {
+        for host in [
+            "hkust-gz.edu.cn",
+            "library.hkust-gz.edu.cn",
+            "hkust.edu.hk",
+            "www.hkust.edu.hk",
+        ] {
+            assert_eq!(
+                classify_target(&target(host, None)),
+                TargetClass::CampusDomain
+            );
+        }
+        for host in [
+            "chatgpt.com",
+            "not-hkust-gz.edu.cn",
+            "hkust-gz.edu.cn.example",
+        ] {
+            assert_eq!(classify_target(&target(host, None)), TargetClass::General);
+        }
+    }
+
+    #[test]
+    fn literal_addresses_never_use_public_domain_fallback() {
+        assert_eq!(
+            classify_target(&target("private.invalid", Some(Ipv4Addr::new(10, 0, 0, 8)),)),
+            TargetClass::PrivateLiteral
+        );
+        assert_eq!(
+            classify_target(&target("203.0.113.8", Some(Ipv4Addr::new(203, 0, 113, 8)),)),
+            TargetClass::General
+        );
     }
 }

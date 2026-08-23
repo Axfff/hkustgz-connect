@@ -143,13 +143,14 @@
               <div class="tool-row"><div><strong>SOCKS5 endpoint</strong><code id="socksEndpoint">127.0.0.1:1080</code></div><button class="icon-button copy-trigger" type="button" data-copy="socks" aria-label="Copy SOCKS5 endpoint" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
               <div class="tool-row"><div><strong>PAC URL</strong><code id="pacEndpoint">-</code></div><button class="icon-button copy-trigger" type="button" data-copy="pac" aria-label="Copy PAC URL" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
               <div class="tool-row"><div><strong>SSH ProxyCommand</strong><code id="sshEndpoint">Load the generated snippet</code></div><button class="icon-button copy-trigger" type="button" data-copy="ssh" aria-label="Copy SSH ProxyCommand" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
+              <div class="tool-row"><div><strong>Shadowrocket module</strong><code>Secure DNS + campus rules</code></div><button class="icon-button copy-trigger" type="button" data-copy="shadowrocket" aria-label="Copy Shadowrocket module" title="Copy"><svg><use href="#i-copy"></use></svg></button></div>
             </div>
             <p id="copyMessage" class="form-message" role="status"></p>
           </section>
         </section>
 
         <section class="page" data-page-panel="diagnostics" hidden>
-          <p class="page-intro">Checks distinguish the local process, proxy listener, campus data path, gateway, and optional Shadowrocket relay.</p>
+          <p class="page-intro">Checks distinguish the local process, campus data path, gateway, Shadowrocket relay, and public realtime route.</p>
           <section class="section first">
             <div class="section-heading"><div><h2>Health checks</h2><p id="diagnosticsMeta" class="section-note">Not run in this session</p></div><button id="runDiagnosticsButton" class="button secondary diagnostics-trigger" type="button"><svg><use href="#i-stethoscope"></use></svg>Run checks</button></div>
             <div id="diagnosticsList" class="diagnostics-list panel"></div>

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.6 - 2026-08-23
+
+- Added an optional ChatGPT/Codex HTTPS-WebSocket route check to desktop
+  diagnostics and a matching `doctor-public` CLI command.
+- Added a generated Shadowrocket module that keeps OpenAI realtime traffic on
+  the normal proxy, covers the current OpenAI desktop/authentication dependency
+  list, uses proxied encrypted DNS, disables the failing IPv6 fallback, and
+  routes only approved campus destinations to `HKUSTGZ`.
+- Hardened `ec-fallback` so non-campus destinations use Shadowrocket's general
+  SOCKS upstream instead of the campus engine or direct public DNS.
+- Added CLI-managed installation for the hardened Shadowrocket relay and kept
+  private campus CIDRs confined to the locally generated module.
+
 ## 1.1.5 - 2026-08-23
 
 - Coalesced concurrent startup credential reads into one asynchronous macOS

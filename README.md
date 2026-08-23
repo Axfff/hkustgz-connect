@@ -23,8 +23,8 @@ does not terminate an engine it did not start.
 The [release page](https://github.com/Axfff/hkustgz-connect/releases/latest)
 contains:
 
-- `hkustgzconnect-1.1.5-mac-arm64.dmg` for the menu-bar app;
-- `hkustgz-connect-cli-1.1.5-macos-arm64.tar.gz` for the CLI;
+- `hkustgzconnect-1.1.6-mac-arm64.dmg` for the menu-bar app;
+- `hkustgz-connect-cli-1.1.6-macos-arm64.tar.gz` for the CLI;
 - `SHA256SUMS.txt` for verification.
 
 The current binary release supports Apple silicon Macs. Intel and other
@@ -53,7 +53,7 @@ after an app update.
 Extract the CLI archive, then run:
 
 ```bash
-cd hkustgz-connect-cli-1.1.5-macos-arm64
+cd hkustgz-connect-cli-1.1.6-macos-arm64
 ./cli/hkustgzconnect configure YOUR_CAMPUS_USERNAME
 ./cli/hkustgzconnect set-password
 ./cli/hkustgzconnect up
@@ -120,6 +120,26 @@ For browsers and tools that support PAC files:
 
 See [Traffic and proxying](docs/TRAFFIC_AND_PROXYING.md) for Shadowrocket and
 literal private-IP routing.
+
+### Shadowrocket coexistence
+
+Install the loopback relay and generate the compatibility module:
+
+```bash
+./cli/hkustgzconnect install-fallback
+./cli/hkustgzconnect shadowrocket-module
+./cli/hkustgzconnect doctor-public
+```
+
+Create a Shadowrocket SOCKS5 node named `HKUSTGZ` at `127.0.0.1:1081`. Then
+open **Config > Modules > New Module**, paste the generated file's contents,
+save it, and enable `HKUST(GZ) Connect`. Leave a normal Internet-capable node
+selected as the default. The module gives campus rules higher priority without
+making the campus node the global proxy. It also uses encrypted DNS through the
+normal proxy for ChatGPT and Codex realtime connections.
+
+The app exposes the same generated module under **Access > External
+applications** and checks the public realtime route under **Diagnostics**.
 
 ## Build and test
 

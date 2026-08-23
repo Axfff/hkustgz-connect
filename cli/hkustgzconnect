@@ -7,6 +7,9 @@ ROOT="$(cd "$HERE/.." && pwd -P)"
 ENGINE_SOURCE_ROOT="$ROOT/engine"
 ENGINE_CONFIG="$ROOT/config/hkustgz.json"
 PAC_TEMPLATE="$HERE/campus-only.pac.template"
+SHADOWROCKET_TEMPLATE="$HERE/shadowrocket-hkustgz.module.template"
+[ -f "$SHADOWROCKET_TEMPLATE" ] \
+  || SHADOWROCKET_TEMPLATE="$ROOT/desktop/assets/shadowrocket-hkustgz.module.template"
 
 case "$(uname -m)" in
   arm64) ENGINE_ARCH="arm64" ;;
@@ -28,6 +31,7 @@ RUNDIR="$HOME/.hkustgzconnect"
 LOG="$RUNDIR/hkustgzconnect.log"
 PIDFILE="$RUNDIR/hkustgzconnect.pid"
 PAC_FILE="$RUNDIR/campus-only.pac"
+SHADOWROCKET_MODULE="$RUNDIR/hkustgz-connect.module"
 KEYCHAIN_SERVICE="hkustgzconnect"
 SOCKS_HOST="127.0.0.1"
 SOCKS_PORT="$(awk -F'[:\"]' '/^socks_bind/{print $(NF-1); exit}' "$CONF" 2>/dev/null)"
@@ -35,6 +39,12 @@ SOCKS_PORT="${SOCKS_PORT:-1080}"
 LABEL="com.hkustgz.connect"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 FALLBACK_PORT="1081"
+SHADOWROCKET_PORT="${HKUSTGZ_SHADOWROCKET_PORT:-1082}"
+FALLBACK_BIN="$ENGINE_SOURCE_ROOT/bin/ec-fallback-darwin-$ENGINE_ARCH"
+[ -x "$FALLBACK_BIN" ] || FALLBACK_BIN="$ENGINE_SOURCE_ROOT/target/release/ec-fallback"
+FALLBACK_INSTALL="$RUNDIR/bin/ec-fallback"
+FALLBACK_LABEL="com.hkustgz.connect-fallback"
+FALLBACK_PLIST="$HOME/Library/LaunchAgents/$FALLBACK_LABEL.plist"
 CAMPUS_PROBE_URL="https://ssfas.hkust-gz.edu.cn/"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -42,6 +52,7 @@ valid_port() {
   [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1025 ] && [ "$1" -le 65535 ]
 }
 valid_port "$SOCKS_PORT" || die "SOCKS port must be within 1025..65535"
+valid_port "$SHADOWROCKET_PORT" || die "Shadowrocket SOCKS port must be within 1025..65535"
 
 mkdir -p "$RUNDIR"
 chmod 700 "$RUNDIR"
@@ -115,6 +126,20 @@ ensure_engine() {
   (cd "$ENGINE_SOURCE_ROOT" && LZMA_API_STATIC=1 "${cargo_runner[@]}" build --locked --release --bin ec-engine) \
     || die "engine build failed"
 }
+ensure_fallback() {
+  [ -x "$FALLBACK_BIN" ] && return 0
+  [ -f "$ENGINE_SOURCE_ROOT/Cargo.toml" ] || die "packaged fallback relay is missing: $FALLBACK_BIN"
+  if command -v cargo >/dev/null 2>&1; then
+    cargo_runner=(cargo)
+  elif command -v rustup >/dev/null 2>&1; then
+    toolchain_bin="$(dirname "$(rustup which rustc --toolchain 1.97.1)")"
+    cargo_runner=(env "PATH=$toolchain_bin:$PATH" rustup run 1.97.1 cargo)
+  else
+    die "fallback relay is missing and cargo/rustup is unavailable"
+  fi
+  (cd "$ENGINE_SOURCE_ROOT" && LZMA_API_STATIC=1 "${cargo_runner[@]}" build --locked --release --bin ec-fallback) \
+    || die "fallback relay build failed"
+}
 write_pac() {
   [ -f "$PAC_TEMPLATE" ] || die "PAC template is missing: $PAC_TEMPLATE"
   local temporary="$PAC_FILE.$$.tmp" route_cidrs='[]'
@@ -126,6 +151,63 @@ write_pac() {
     || { [ -f "$temporary" ] && mv "$temporary" "$temporary.failed"; die "cannot generate PAC"; }
   chmod 600 "$temporary"
   mv "$temporary" "$PAC_FILE"
+}
+write_shadowrocket_module() {
+  [ -f "$SHADOWROCKET_TEMPLATE" ] || die "Shadowrocket module template is missing"
+  local temporary="$SHADOWROCKET_MODULE.$$.tmp" marker='__ROUTE_IPV4_RULES__'
+  local route_json='[]' marker_count=0 cidr
+  if [ -f "$POLICY" ]; then
+    route_json="$(plutil -extract route_ipv4_cidrs json -expect array -o - "$POLICY" 2>/dev/null)" \
+      || die "local network policy is invalid: $POLICY"
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "$marker" ]; then
+      marker_count=$((marker_count + 1))
+      while IFS= read -r cidr; do
+        [ -n "$cidr" ] || continue
+        [[ "$cidr" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([1-9]|[12][0-9]|3[0-2])$ ]] \
+          || { [ -f "$temporary" ] && mv "$temporary" "$temporary.failed"; die "local network policy contains an invalid route"; }
+        printf 'IP-CIDR,%s,HKUSTGZ,no-resolve\n' "$cidr" >> "$temporary"
+      done < <(printf '%s' "$route_json" | tr -d '[]" ' | tr ',' '\n')
+    else
+      printf '%s\n' "$line" >> "$temporary"
+    fi
+  done < "$SHADOWROCKET_TEMPLATE"
+  [ "$marker_count" -eq 1 ] \
+    || { [ -f "$temporary" ] && mv "$temporary" "$temporary.failed"; die "Shadowrocket module template is invalid"; }
+  chmod 600 "$temporary"
+  mv "$temporary" "$SHADOWROCKET_MODULE"
+}
+
+probe_realtime_path() {
+  local host="$1" proxy="${2:-}" http_code
+  local -a args=(--http1.1 --connect-timeout 4 --max-time 8 -sS -o /dev/null -w '%{http_code}'
+    -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13'
+    -H 'Sec-WebSocket-Key: aGt1c3Rnei1jb25uZWN0IQ==')
+  [ -z "$proxy" ] || args+=(--proxy "$proxy")
+  http_code="$(curl "${args[@]}" "https://$host/" 2>/dev/null)" || true
+  [ -n "$http_code" ] && [ "$http_code" != "000" ]
+}
+
+doctor_public_network() {
+  local failed=0 explicit_proxy="socks5h://$SOCKS_HOST:$SHADOWROCKET_PORT" host
+  for host in chatgpt.com ws.chatgpt.com; do
+    if probe_realtime_path "$host"; then
+      printf 'pass: %s system HTTPS/WebSocket path answered\n' "$host"
+    elif probe_realtime_path "$host" "$explicit_proxy"; then
+      printf 'fail: %s works through Shadowrocket SOCKS but not through the system/TUN path\n' "$host" >&2
+      failed=1
+    else
+      printf 'fail: %s is unreachable through both system and Shadowrocket SOCKS paths\n' "$host" >&2
+      failed=1
+    fi
+  done
+  if [ "$failed" -ne 0 ]; then
+    printf 'review: Shadowrocket > Config > Modules must contain an enabled HKUST(GZ) Connect module\n' >&2
+    printf 'source: create a New Module and paste the contents of %s\n' "$SHADOWROCKET_MODULE" >&2
+    printf 'review: keep HKUSTGZ as a campus-only node, not the default proxy\n' >&2
+  fi
+  return "$failed"
 }
 rotate_log() {
   [ -s "$LOG" ] && cp -p "$LOG" "$LOG.previous"
@@ -309,6 +391,51 @@ case "${1:-}" in
     printf 'file://%s\n' "$PAC_FILE"
     ;;
 
+  shadowrocket-module)
+    write_shadowrocket_module
+    printf '%s\n' "$SHADOWROCKET_MODULE"
+    ;;
+
+  doctor-public)
+    write_shadowrocket_module
+    doctor_public_network
+    ;;
+
+  install-fallback)
+    ensure_fallback
+    mkdir -p "$RUNDIR/bin" "$(dirname "$FALLBACK_PLIST")"
+    install -m 755 "$FALLBACK_BIN" "$FALLBACK_INSTALL"
+    printf '%s\n' \
+      '<?xml version="1.0" encoding="UTF-8"?>' \
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+      '<plist version="1.0"><dict>' \
+      "<key>Label</key><string>$FALLBACK_LABEL</string>" \
+      '<key>ProgramArguments</key><array>' \
+      "<string>$FALLBACK_INSTALL</string>" \
+      '<string>--listen</string><string>127.0.0.1:1081</string>' \
+      "<string>--upstream</string><string>127.0.0.1:$SOCKS_PORT</string>" \
+      "<string>--general-upstream</string><string>127.0.0.1:$SHADOWROCKET_PORT</string>" \
+      '<string>--direct-interface</string><string>en0</string>' \
+      '</array>' \
+      '<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>' \
+      "<key>StandardOutPath</key><string>$RUNDIR/fallback.out.log</string>" \
+      "<key>StandardErrorPath</key><string>$RUNDIR/fallback.err.log</string>" \
+      '</dict></plist>' > "$FALLBACK_PLIST"
+    chmod 600 "$FALLBACK_PLIST"
+    launchctl bootout "gui/$(id -u)/$FALLBACK_LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$FALLBACK_PLIST" \
+      || die "could not load the Shadowrocket fallback relay"
+    write_shadowrocket_module
+    printf 'Shadowrocket relay installed on %s:%s; module: %s\n' \
+      "$SOCKS_HOST" "$FALLBACK_PORT" "$SHADOWROCKET_MODULE"
+    ;;
+
+  uninstall-fallback)
+    launchctl bootout "gui/$(id -u)/$FALLBACK_LABEL" 2>/dev/null || true
+    [ -f "$FALLBACK_PLIST" ] && mv "$FALLBACK_PLIST" "$RUNDIR/$FALLBACK_LABEL.plist.uninstalled"
+    printf 'Shadowrocket fallback relay removed\n'
+    ;;
+
   install)
     require_account
     ensure_engine
@@ -360,6 +487,10 @@ case "${1:-}" in
       '  status                       verify listener ownership and campus access' \
       '  test                         run the approved campus data-path probe' \
       '  pac                          generate the campus-only PAC file' \
+      '  shadowrocket-module          generate secure DNS and campus-only rules' \
+      '  doctor-public                test ChatGPT/Codex realtime network paths' \
+      '  install-fallback             install the Shadowrocket coexistence relay' \
+      '  uninstall-fallback           remove the Shadowrocket coexistence relay' \
       '  logs                         follow CLI-owned engine logs' \
       '  install                      install CLI launch-at-login ownership' \
       '  uninstall                    remove CLI launch-at-login ownership'

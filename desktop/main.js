@@ -22,7 +22,10 @@ const { appendLog, readLogTail, resetLog } = require('./lib/secure-log');
 const { loadTrayImage } = require('./lib/tray-icon');
 const { describePortConflict, isCampusEngineExecutable } = require('./lib/port-conflict');
 const { probeSocksConnect } = require('./lib/socks-health');
-const { diagnosticsAreHealthy, probeTcpEndpoint } = require('./lib/diagnostics');
+const {
+  diagnosticsAreHealthy, probeTcpEndpoint, probeWebSocketEndpoint,
+} = require('./lib/diagnostics');
+const { renderShadowrocketModule } = require('./lib/shadowrocket-module');
 const { deriveOperationalState } = require('./lib/presentation-state');
 const {
   PROBE_TIMEOUT_MS, TELEMETRY_TICK_MS, shouldProbe, shouldRecover,
@@ -546,7 +549,7 @@ async function runDiagnostics() {
     const port = socksPort();
     const enginePid = engine ? engine.pid : externalEnginePid;
     const engineRunning = !!enginePid;
-    const [listener, ownerPid, campus, gateway, relay] = await Promise.all([
+    const [listener, ownerPid, campus, gateway, relay, publicRealtime] = await Promise.all([
       probeTcpEndpoint({ port, timeoutMs: 1500 }),
       listeningPid(port),
       engineRunning
@@ -559,6 +562,7 @@ async function runDiagnostics() {
         : Promise.resolve(false),
       probeTcpEndpoint({ host: GATEWAY_HOST, port: 443, timeoutMs: 3000 }),
       probeTcpEndpoint({ port: 1081, timeoutMs: 1000 }),
+      probeWebSocketEndpoint({ host: 'chatgpt.com', timeoutMs: 5000 }),
     ]);
     const listenerOwned = listener.ok && engineRunning && ownerPid === enginePid;
 
@@ -606,6 +610,15 @@ async function runDiagnostics() {
         label: 'Shadowrocket relay',
         status: relay.ok ? 'pass' : 'unavailable',
         detail: relay.ok ? 'Listening on 127.0.0.1:1081' : 'Not installed or not running',
+        required: false,
+      },
+      {
+        id: 'public-realtime',
+        label: 'Public realtime route',
+        status: publicRealtime.ok ? 'pass' : 'fail',
+        detail: publicRealtime.ok
+          ? `chatgpt.com WebSocket path answered in ${Math.round(publicRealtime.latencyMs)} ms`
+          : `chatgpt.com failed before WebSocket response (${publicRealtime.error || 'unknown'})`,
         required: false,
       },
     ];
@@ -786,6 +799,13 @@ ipcMain.handle('ssh-config', () => {
     return `${note}\nProxyCommand "${connectExe}" -S 127.0.0.1:${port} %h %p`;
   }
   return `${note}\nProxyCommand /usr/bin/nc -X 5 -x 127.0.0.1:${port} %h %p`;
+});
+ipcMain.handle('shadowrocket-module', () => {
+  const template = fs.readFileSync(
+    path.join(__dirname, 'assets', 'shadowrocket-hkustgz.module.template'),
+    'utf8',
+  );
+  return renderShadowrocketModule(template, loadPolicy().routeIpv4Cidrs);
 });
 ipcMain.handle('logout', () => {
   disconnect();

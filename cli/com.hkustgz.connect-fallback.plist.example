@@ -11,6 +11,8 @@
         <string>127.0.0.1:1081</string>
         <string>--upstream</string>
         <string>127.0.0.1:1080</string>
+        <string>--general-upstream</string>
+        <string>127.0.0.1:1082</string>
         <string>--direct-interface</string>
         <string>en0</string>
     </array>

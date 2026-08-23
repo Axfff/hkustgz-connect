@@ -18,6 +18,7 @@ let telemetry = { connCount: 0, apps: [], latencyMs: null };
 let resources = [];
 let pacUrl = '';
 let sshConfig = '';
+let shadowrocketModule = '';
 let currentPage = 'overview';
 let openBusy = false;
 let settingsDirty = false;
@@ -324,6 +325,10 @@ document.querySelectorAll('.copy-trigger').forEach((button) => button.addEventLi
   if (button.dataset.copy === 'socks') value = `127.0.0.1:${Number(settings.port) || 1080}`;
   if (button.dataset.copy === 'pac') value = pacUrl;
   if (button.dataset.copy === 'ssh') value = sshConfig || await window.api.sshConfig();
+  if (button.dataset.copy === 'shadowrocket') {
+    value = shadowrocketModule || await window.api.shadowrocketModule();
+    shadowrocketModule = value;
+  }
   if (!value) return;
   await window.api.copy(value);
   $('copyMessage').textContent = 'Copied.';
