@@ -6,8 +6,17 @@ cd "$ROOT"
 
 fail() {
   printf 'public-tree check failed: %s\n' "$*" >&2
+  printf '::error title=Public tree audit::%s\n' "$*" >&2
   exit 1
 }
+
+audit_error() {
+  local line="$1" status="$2"
+  printf '::error title=Public tree audit::unexpected failure at line %s (status %s)\n' \
+    "$line" "$status" >&2
+  exit "$status"
+}
+trap 'audit_error "$LINENO" "$?"' ERR
 
 for forbidden in \
   config.toml cred.bin settings.json campus-credentials.json \
