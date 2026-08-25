@@ -17,10 +17,20 @@ healthy engine on `127.0.0.1:1080`, the other attaches to that engine instead
 of starting a second session. Disconnecting or quitting an attached interface
 does not terminate an engine it did not start.
 
+## A campus path, not another system VPN
+
 The engine binds to loopback and does not replace the default route, system
 DNS, or system proxy by default. This reduces collisions with other network
 services, but it cannot guarantee compatibility when two TUNs claim the same
 route or DNS policy. See [Network coexistence](docs/NETWORK_COEXISTENCE.md).
+
+[![Architecture comparison: system VPN tools can overlap in the shared macOS network layer, while HKUST(GZ) Connect carries only explicitly selected campus traffic and leaves Internet and tailnet traffic on their existing paths.](docs/assets/network-coexistence-overview.png)](docs/assets/network-coexistence-overview.png)
+
+Unselected Internet and tailnet traffic do not pass through the campus engine,
+so HKUST(GZ) Connect adds no data-path hop to those connections. Selected
+campus traffic uses local proxying plus the required campus tunnel. See the
+[detailed architecture](docs/ARCHITECTURE.md#traffic-ownership-and-coexistence)
+for the exact PAC, SSH, Shadowrocket, Mihomo, and Tailscale paths.
 
 > This is a community project, not an official HKUST or HKUST(GZ) product.
 > Use it only with an account and resources you are authorized to access.

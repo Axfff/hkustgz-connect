@@ -10,6 +10,31 @@ The comparison below refers to the reviewed EasyConnect 7.6.7 macOS package
 and the current gateway profile. The vendor client and gateway can expose more
 features at other institutions or after an upgrade.
 
+## Why system-level overlap can happen
+
+```mermaid
+flowchart TB
+    APPS["Applications"] --> MACOS["Shared macOS routes, DNS, and interfaces"]
+    EASY["EasyConnect L3 / VPN DNS"] -. "may configure; profile-dependent" .-> MACOS
+    PROXY["Shadowrocket / Clash TUN or DNS mode"] -. "may configure" .-> MACOS
+    TAILSCALE["Tailscale routes / MagicDNS"] -. "may configure" .-> MACOS
+    MACOS --> DESTINATIONS["Campus, Internet, and tailnet destinations"]
+    MACOS -. "when route or DNS claims overlap" .-> CONFLICT["Possible conflict:<br/>unexpected route, name-resolution failure,<br/>or unreachable service"]
+```
+
+The reviewed EasyConnect package exposes L3 and DNS integration, but its active
+behavior depends on the institution profile. Shadowrocket and Clash/Mihomo
+share this system layer only when their TUN or DNS modes are enabled. A conflict
+is possible when two tools claim the same destination or resolver; the figure
+does not imply that any one tool always takes the default route or always
+causes a conflict.
+
+See [Architecture](ARCHITECTURE.md#traffic-ownership-and-coexistence) for the
+scoped alternative and its explicit application, proxy-rule, and SSH entry
+points.
+
+## Capability comparison
+
 | Area | EasyConnect reference client | HKUST(GZ) Connect | Practical consequence |
 | --- | --- | --- | --- |
 | Primary purpose | General Sangfor SSL VPN client with institution-selected features | Focused HKUST(GZ) campus-access client | Smaller supported scope and simpler daily workflow |

@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1400" viewBox="0 0 1200 1400" role="img" aria-labelledby="title desc">
+  <title id="title">Campus access without taking over your network</title>
+  <desc id="desc">EasyConnect, proxy TUN modes, and Tailscale may configure the shared macOS route, DNS, and interface layer, where overlapping policies can conflict. HKUST(GZ) Connect instead receives only explicitly selected campus connections through a loopback proxy. Other Internet traffic stays with the existing proxy or macOS route, and tailnet traffic stays with Tailscale.</desc>
+
+  <defs>
+    <marker id="arrow-control" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9A6500"/>
+    </marker>
+    <marker id="arrow-campus" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#128779"/>
+    </marker>
+    <marker id="arrow-internet" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3478A8"/>
+    </marker>
+    <marker id="arrow-tailnet" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#66717C"/>
+    </marker>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; }
+      .title { fill: #17232D; font-size: 44px; font-weight: 700; }
+      .subtitle { fill: #52606D; font-size: 25px; font-weight: 400; }
+      .panel-title { fill: #17232D; font-size: 36px; font-weight: 700; }
+      .panel-copy { fill: #52606D; font-size: 23px; font-weight: 400; }
+      .node-title { fill: #17232D; font-size: 25px; font-weight: 700; }
+      .node-title-small { fill: #17232D; font-size: 22px; font-weight: 700; }
+      .node-copy { fill: #52606D; font-size: 20px; font-weight: 400; }
+      .node-copy-small { fill: #52606D; font-size: 18px; font-weight: 400; }
+      .small-label { fill: #52606D; font-size: 18px; font-weight: 700; letter-spacing: 0; }
+      .lane-label { fill: #52606D; font-size: 18px; font-weight: 700; }
+      .footer { fill: #0B6259; font-size: 23px; font-weight: 700; }
+      .qualification { fill: #52606D; font-size: 18px; font-weight: 400; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="1400" fill="#F7F9FB"/>
+
+  <text x="48" y="75" class="title">Campus access without taking over your network</text>
+  <text x="48" y="121" class="subtitle">HKUST(GZ) Connect adds a scoped campus path; your existing network tools stay in control.</text>
+  <rect x="48" y="158" width="1104" height="4" fill="#128779"/>
+
+  <!-- Shared system-network layer -->
+  <rect x="48" y="190" width="1104" height="470" rx="8" fill="#FFFFFF" stroke="#CCD6DE" stroke-width="2"/>
+  <text x="84" y="244" class="panel-title">Why system-level network tools can overlap</text>
+  <text x="84" y="282" class="panel-copy">When enabled, multiple tools may change the same macOS network controls.</text>
+
+  <rect x="84" y="320" width="300" height="122" rx="8" fill="#FFF4D6" stroke="#9A6500" stroke-width="2"/>
+  <path d="M 112 348 L 130 338 L 148 348 L 148 370 C 148 383 140 394 130 399 C 120 394 112 383 112 370 z" fill="none" stroke="#9A6500" stroke-width="4"/>
+  <path d="M 122 367 L 128 373 L 139 359" fill="none" stroke="#9A6500" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="168" y="360" class="node-title">EasyConnect</text>
+  <text x="168" y="390" class="node-copy-small">routes + VPN DNS</text>
+  <text x="168" y="419" class="small-label">profile-dependent</text>
+
+  <rect x="450" y="320" width="300" height="122" rx="8" fill="#FFF4D6" stroke="#9A6500" stroke-width="2"/>
+  <path d="M 478 348 H 522 M 478 366 H 510 M 478 384 H 522" fill="none" stroke="#9A6500" stroke-width="4" stroke-linecap="round"/>
+  <path d="M 510 358 L 522 366 L 510 374" fill="none" stroke="#9A6500" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="542" y="354" class="node-title-small">Proxy TUN mode</text>
+  <text x="542" y="386" class="node-copy-small">Shadowrocket / Clash</text>
+  <text x="542" y="415" class="node-copy-small">routes + DNS policy</text>
+
+  <rect x="816" y="320" width="300" height="122" rx="8" fill="#FFF4D6" stroke="#9A6500" stroke-width="2"/>
+  <circle cx="850" cy="352" r="8" fill="#9A6500"/>
+  <circle cx="882" cy="370" r="8" fill="#9A6500"/>
+  <circle cx="850" cy="390" r="8" fill="#9A6500"/>
+  <path d="M 857 356 L 875 366 M 875 374 L 857 386 M 850 360 V 382" fill="none" stroke="#9A6500" stroke-width="4" stroke-linecap="round"/>
+  <text x="906" y="360" class="node-title">Tailscale</text>
+  <text x="906" y="390" class="node-copy-small">tailnet/subnet routes</text>
+  <text x="906" y="417" class="node-copy-small">+ MagicDNS</text>
+
+  <path d="M 234 442 V 466 H 400 V 490" fill="none" stroke="#9A6500" stroke-width="3" stroke-dasharray="8 8" marker-end="url(#arrow-control)"/>
+  <path d="M 600 442 V 490" fill="none" stroke="#9A6500" stroke-width="3" stroke-dasharray="8 8" marker-end="url(#arrow-control)"/>
+  <path d="M 966 442 V 466 H 800 V 490" fill="none" stroke="#9A6500" stroke-width="3" stroke-dasharray="8 8" marker-end="url(#arrow-control)"/>
+
+  <rect x="252" y="490" width="696" height="86" rx="8" fill="#FFFFFF" stroke="#52606D" stroke-width="2"/>
+  <path d="M 284 517 H 326 M 284 533 H 338 M 284 549 H 318" fill="none" stroke="#52606D" stroke-width="4" stroke-linecap="round"/>
+  <text x="365" y="527" class="node-title">Shared macOS network layer</text>
+  <text x="365" y="557" class="node-copy">routes, DNS, and tunnel interfaces</text>
+
+  <rect x="150" y="600" width="900" height="44" rx="8" fill="#FCE8E6" stroke="#B53A32" stroke-width="2"/>
+  <path d="M 180 611 L 192 633 H 168 z" fill="none" stroke="#B53A32" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M 180 617 V 624 M 180 629 V 630" stroke="#B53A32" stroke-width="3" stroke-linecap="round"/>
+  <text x="210" y="629" fill="#7F251F" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="700">If policies overlap: wrong route, replaced DNS, or competing tunnel capture</text>
+
+  <!-- Scoped campus path -->
+  <rect x="48" y="700" width="1104" height="650" rx="8" fill="#FFFFFF" stroke="#CCD6DE" stroke-width="2"/>
+  <text x="84" y="754" class="panel-title">HKUST(GZ) Connect stays scoped</text>
+  <text x="84" y="792" class="panel-copy">An application or existing proxy rule explicitly selects the campus path.</text>
+
+  <text x="84" y="827" fill="#0B6259" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">SELECTED CAMPUS TRAFFIC</text>
+
+  <rect x="84" y="842" width="290" height="116" rx="8" fill="#DDF5F1" stroke="#128779" stroke-width="2"/>
+  <rect x="108" y="870" width="42" height="32" rx="3" fill="none" stroke="#128779" stroke-width="4"/>
+  <path d="M 116 910 H 142" stroke="#128779" stroke-width="4" stroke-linecap="round"/>
+  <text x="172" y="878" class="node-title">Campus opt-in</text>
+  <text x="172" y="909" class="node-copy">PAC, proxy rule,</text>
+  <text x="172" y="934" class="node-copy">SSH or SOCKS app</text>
+
+  <path d="M 374 900 H 444" fill="none" stroke="#128779" stroke-width="4" marker-end="url(#arrow-campus)"/>
+
+  <rect x="454" y="842" width="300" height="116" rx="8" fill="#DDF5F1" stroke="#128779" stroke-width="3"/>
+  <rect x="478" y="867" width="44" height="14" rx="3" fill="none" stroke="#128779" stroke-width="4"/>
+  <rect x="478" y="887" width="44" height="14" rx="3" fill="none" stroke="#128779" stroke-width="4"/>
+  <circle cx="512" cy="874" r="2.5" fill="#128779"/>
+  <circle cx="512" cy="894" r="2.5" fill="#128779"/>
+  <text x="544" y="876" class="node-title-small">Campus engine</text>
+  <text x="544" y="907" class="node-copy-small">HKUST(GZ) Connect</text>
+  <text x="544" y="934" class="small-label">127.0.0.1:1080</text>
+
+  <path d="M 754 900 H 824" fill="none" stroke="#128779" stroke-width="4" marker-end="url(#arrow-campus)"/>
+
+  <rect x="834" y="842" width="282" height="116" rx="8" fill="#DDF5F1" stroke="#128779" stroke-width="2"/>
+  <path d="M 862 917 V 882 L 883 869 L 904 882 V 917 M 853 917 H 913 M 870 892 H 876 M 890 892 H 896 M 870 904 H 876 M 890 904 H 896" fill="none" stroke="#128779" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="934" y="888" class="node-title-small">Campus network</text>
+  <text x="934" y="920" class="node-copy-small">reviewed services</text>
+
+  <text x="84" y="997" class="small-label">UNSELECTED INTERNET TRAFFIC - BYPASSES CAMPUS ENGINE</text>
+  <rect x="84" y="1010" width="290" height="82" rx="8" fill="#F3F5F7" stroke="#AEB9C2" stroke-width="2"/>
+  <text x="108" y="1050" class="node-title">Other traffic</text>
+  <text x="108" y="1078" class="node-copy">no campus opt-in</text>
+  <path d="M 374 1051 H 444" fill="none" stroke="#3478A8" stroke-width="4" marker-end="url(#arrow-internet)"/>
+  <rect x="454" y="1010" width="300" height="82" rx="8" fill="#E8F2FA" stroke="#3478A8" stroke-width="2"/>
+  <text x="478" y="1050" class="node-title-small">Existing proxy / macOS</text>
+  <text x="478" y="1078" class="node-copy">unchanged path</text>
+  <path d="M 754 1051 H 824" fill="none" stroke="#3478A8" stroke-width="4" marker-end="url(#arrow-internet)"/>
+  <rect x="834" y="1010" width="282" height="82" rx="8" fill="#E8F2FA" stroke="#3478A8" stroke-width="2"/>
+  <circle cx="875" cy="1051" r="24" fill="none" stroke="#3478A8" stroke-width="4"/>
+  <path d="M 851 1051 H 899 M 875 1027 C 863 1039 863 1063 875 1075 M 875 1027 C 887 1039 887 1063 875 1075" fill="none" stroke="#3478A8" stroke-width="3"/>
+  <text x="922" y="1060" class="node-title">Internet</text>
+
+  <text x="84" y="1127" class="small-label">TAILNET TRAFFIC - BYPASSES CAMPUS ENGINE</text>
+  <rect x="84" y="1140" width="290" height="82" rx="8" fill="#F3F5F7" stroke="#AEB9C2" stroke-width="2"/>
+  <text x="108" y="1180" class="node-title">Tailnet apps</text>
+  <text x="108" y="1208" class="node-copy">tailnet destinations</text>
+  <path d="M 374 1181 H 444" fill="none" stroke="#66717C" stroke-width="4" marker-end="url(#arrow-tailnet)"/>
+  <rect x="454" y="1140" width="300" height="82" rx="8" fill="#EDF0F3" stroke="#66717C" stroke-width="2"/>
+  <circle cx="488" cy="1166" r="6" fill="#66717C"/>
+  <circle cx="514" cy="1180" r="6" fill="#66717C"/>
+  <circle cx="488" cy="1196" r="6" fill="#66717C"/>
+  <path d="M 494 1169 L 508 1177 M 508 1184 L 494 1193 M 488 1172 V 1190" fill="none" stroke="#66717C" stroke-width="3" stroke-linecap="round"/>
+  <text x="544" y="1187" class="node-title">Tailscale</text>
+  <path d="M 754 1181 H 824" fill="none" stroke="#66717C" stroke-width="4" marker-end="url(#arrow-tailnet)"/>
+  <rect x="834" y="1140" width="282" height="82" rx="8" fill="#EDF0F3" stroke="#66717C" stroke-width="2"/>
+  <text x="866" y="1187" class="node-title">Tailnet</text>
+
+  <rect x="84" y="1248" width="1032" height="58" rx="8" fill="#E8F7F4" stroke="#128779" stroke-width="2"/>
+  <text x="600" y="1285" class="footer" text-anchor="middle">Default: no TUN, no default route, no system DNS, no system proxy</text>
+  <text x="600" y="1334" class="qualification" text-anchor="middle">Private route overlaps can still require review. Realtime/DNS repair is an explicit exception.</text>
+</svg>

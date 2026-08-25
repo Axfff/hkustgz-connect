@@ -1,18 +1,57 @@
 # Architecture
 
-## Components
+## Traffic ownership and coexistence
 
-```text
-macOS app ----+---- starts or attaches to ---- Rust engine ---- campus gateway
-CLI ----------+                                |
-                                                +---- 127.0.0.1:1080 SOCKS5
-                                                          ^
-Browser/PAC, native SOCKS, OpenSSH, or Mihomo campus rules +
-Shadowrocket campus rules ---- 127.0.0.1:1081 user relay -+
+Traffic reaches the engine only through an application or rule that explicitly
+selects the campus path. The app does not insert a system-wide traffic
+classifier ahead of other network services.
 
-Primary proxy ---- general Internet policy (unchanged by default)
-Tailscale -------- tailnet routes and MagicDNS (unchanged by default)
+```mermaid
+flowchart TB
+    ENGINE["Shared Rust engine<br/>SOCKS5 127.0.0.1:1080<br/>userspace TCP/IP + engine-side DNS"]
+    GATEWAY["Campus VPN gateway"]
+    SERVICES["Campus services"]
+    VPNDNS["VPN-side DNS when supplied"]
+
+    UI["macOS app or CLI"] -. "starts or attaches; diagnoses" .-> ENGINE
+    POLICY["Reviewed campus domains<br/>+ authorized local IPv4 CIDRs"] -. "destination allowlist" .-> ENGINE
+
+    subgraph ENTRY["Explicit campus entry points"]
+        PAC["PAC-aware browser"] -->|"matched campus host"| ENGINE
+        SOCKS["SOCKS5h-aware app"] -->|"configured target; unresolved hostname"| ENGINE
+
+        SSH["Managed HPC SSH helper"] --> PROBE{"Direct campus TCP succeeds?"}
+        PROBE -->|"yes"| SERVICES
+        PROBE -->|"no; pass hostname unresolved"| ENGINE
+
+        SR["Shadowrocket rules"] -->|"campus TCP"| RELAY["User relay<br/>127.0.0.1:1081"]
+        RELAY --> ENGINE
+        SR -->|"campus UDP"| SRREJECT["Reject: relay is TCP-only"]
+
+        MIHOMO["Mihomo rules"] -->|"campus TCP"| ENGINE
+        MIHOMO -->|"campus UDP"| MIREJECT["Reject by generated rule"]
+    end
+
+    PAC -->|"PAC DIRECT / unselected"| PRIMARY["Existing macOS or primary-proxy path"]
+    SR -->|"other traffic"| SRPOLICY["Existing Shadowrocket policy"]
+    MIHOMO -->|"other traffic"| MIPOLICY["Existing Mihomo groups / MATCH"]
+    PRIMARY --> INTERNET["Public Internet"]
+    SRPOLICY --> INTERNET
+    MIPOLICY --> INTERNET
+
+    TAILAPP["Tailnet traffic"] --> TAILSCALE["Tailscale routes + MagicDNS"] --> TAILNET["Tailnet"]
+
+    ENGINE -->|"TLS campus tunnel"| GATEWAY
+    GATEWAY --> SERVICES
+    GATEWAY --> VPNDNS
 ```
+
+The engine is not on the default Internet or tailnet traffic path and does not
+inspect unselected traffic. The optional Shadowrocket Realtime/DNS repair
+changes DNS, IPv6, and selected public-domain rules inside Shadowrocket, while
+locally exported private CIDRs may add scoped routes inside the primary TUN.
+Those integrations can increase the configuration overlap surface, but they do
+not put unselected Internet or tailnet traffic through the campus engine.
 
 `engine/` is the only implementation of authentication, tunnel framing, VPN
 DNS, destination policy, and SOCKS5. The desktop app and CLI are lifecycle and
@@ -45,9 +84,11 @@ retain the same authentication and ownership boundary.
 
 The optional compatibility relay is persistent shared infrastructure rather
 than frontend-owned session state. App and CLI mutations take the same
-owner-only interprocess lock under `~/.hkustgzconnect/`; token-checked release
-and stale-owner recovery prevent concurrent install, rollback, and remove
-operations from overwriting each other.
+owner-only kernel `lockf` lease on the persistent
+`~/.hkustgzconnect/compatibility-relay.lock` file. The lease remains held by an
+open file descriptor for the full mutation and is released automatically when
+that descriptor closes or its process exits. A concurrent install, rollback,
+or remove operation fails clearly instead of overwriting shared state.
 
 ## Network coexistence contract
 
