@@ -11,7 +11,8 @@ use ec_compat::{Error, Result};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 const MAX_FALLBACK_DNS_SERVERS: usize = 4;
@@ -21,6 +22,89 @@ const MAX_KEEPALIVE_INTERVAL_SECONDS: u64 = 300;
 const MAX_KEEPALIVE_FAILURE_THRESHOLD: u64 = 10;
 const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
+const PARENT_CHECK_INTERVAL: Duration = Duration::from_millis(250);
+const PARENT_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+
+struct ParentLifetime {
+    shutdown: tokio::sync::watch::Receiver<bool>,
+    finished: Arc<AtomicBool>,
+}
+
+impl ParentLifetime {
+    fn start(parent_pid: u32) -> Result<Self> {
+        if current_parent_pid()? != parent_pid {
+            return Err(Error(
+                "--parent-pid must identify the engine's actual parent".into(),
+            ));
+        }
+        let (sender, shutdown) = tokio::sync::watch::channel(false);
+        let finished = Arc::new(AtomicBool::new(false));
+        let watchdog_finished = Arc::clone(&finished);
+        std::thread::Builder::new()
+            .name("desktop-parent-watchdog".into())
+            .spawn(move || {
+                while !watchdog_finished.load(Ordering::Acquire) {
+                    // Unix reparents an orphaned child. Checking our own parent
+                    // avoids mistaking a reused PID for the desktop process.
+                    if current_parent_pid().ok() != Some(parent_pid) {
+                        eprintln!("ec-engine: desktop parent exited; stopping app-owned engine");
+                        let _ = sender.send(true);
+                        let deadline = Instant::now() + PARENT_SHUTDOWN_GRACE;
+                        while !watchdog_finished.load(Ordering::Acquire) {
+                            if Instant::now() >= deadline {
+                                // Authentication, stdin and logout use blocking
+                                // APIs. An independent thread also bounds exit
+                                // when they cannot reach the graceful path.
+                                std::process::exit(0);
+                            }
+                            std::thread::sleep(PARENT_CHECK_INTERVAL);
+                        }
+                        return;
+                    }
+                    std::thread::sleep(PARENT_CHECK_INTERVAL);
+                }
+            })
+            .map_err(|_| Error("cannot monitor the desktop parent process".into()))?;
+        Ok(Self { shutdown, finished })
+    }
+
+    async fn wait(&self) {
+        let mut shutdown = self.shutdown.clone();
+        while !*shutdown.borrow_and_update() {
+            if shutdown.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+}
+
+impl Drop for ParentLifetime {
+    fn drop(&mut self) {
+        self.finished.store(true, Ordering::Release);
+    }
+}
+
+#[cfg(unix)]
+fn current_parent_pid() -> Result<u32> {
+    // getppid has no failure mode and does not dereference pointers.
+    Ok(unsafe { libc::getppid() } as u32)
+}
+
+#[cfg(not(unix))]
+fn current_parent_pid() -> Result<u32> {
+    Err(Error(
+        "--parent-pid is supported only on Unix platforms".into(),
+    ))
+}
+
+fn parse_parent_pid(value: &str) -> Result<u32> {
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid > 0 && *pid <= i32::MAX as u32)
+        .filter(|_| value.bytes().all(|byte| byte.is_ascii_digit()))
+        .ok_or_else(|| Error("--parent-pid requires a positive process ID".into()))
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct KeepaliveConfig {
@@ -54,6 +138,7 @@ fn validate_arguments(args: &[String]) -> Result<()> {
     let mut credentials_seen = false;
     let mut socks_seen = false;
     let mut local_policy_seen = false;
+    let mut parent_pid_seen = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -89,6 +174,14 @@ fn validate_arguments(args: &[String]) -> Result<()> {
                 {
                     return Err(Error("--local-policy requires one value".into()));
                 }
+                index += 2;
+            }
+            "--parent-pid" if !parent_pid_seen => {
+                parent_pid_seen = true;
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| Error("--parent-pid requires one value".into()))?;
+                parse_parent_pid(value)?;
                 index += 2;
             }
             argument => {
@@ -240,6 +333,9 @@ async fn main() {
 async fn run() -> Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     validate_arguments(&args)?;
+    let parent = optional_argument_value(&args, "--parent-pid")
+        .map(|value| ParentLifetime::start(parse_parent_pid(value)?))
+        .transpose()?;
     if !args
         .iter()
         .any(|argument| argument == "--credentials-stdin")
@@ -270,6 +366,7 @@ async fn run() -> Result<()> {
             &username,
             &password,
             keepalive.as_ref(),
+            parent.as_ref(),
         )
         .await
         {
@@ -294,7 +391,7 @@ async fn run() -> Result<()> {
                 delay
             }
         };
-        if shutdown_before_reconnect(delay).await? {
+        if shutdown_before_reconnect(delay, parent.as_ref()).await? {
             return Ok(());
         }
     }
@@ -307,6 +404,7 @@ async fn run_connected_session(
     username: &Zeroizing<String>,
     password: &Zeroizing<String>,
     keepalive: Option<&KeepaliveConfig>,
+    parent: Option<&ParentLifetime>,
 ) -> Result<SessionOutcome> {
     let session = AuthenticatedEngineSession::authenticate(config, username, password)?;
     let gateway_dns_servers = session.dns_servers();
@@ -396,7 +494,7 @@ async fn run_connected_session(
         };
         tokio::pin!(service_exit);
         tokio::select! {
-            signal = shutdown_signal() => {
+            signal = shutdown_signal(parent) => {
                 signal?;
                 None
             }
@@ -455,9 +553,12 @@ async fn run_keepalive(resolver: Arc<VpnDnsResolver>, settings: KeepaliveConfig)
     }
 }
 
-async fn shutdown_before_reconnect(delay: Duration) -> Result<bool> {
+async fn shutdown_before_reconnect(
+    delay: Duration,
+    parent: Option<&ParentLifetime>,
+) -> Result<bool> {
     tokio::select! {
-        signal = shutdown_signal() => {
+        signal = shutdown_signal(parent) => {
             signal?;
             Ok(true)
         }
@@ -465,8 +566,21 @@ async fn shutdown_before_reconnect(delay: Duration) -> Result<bool> {
     }
 }
 
+async fn shutdown_signal(parent: Option<&ParentLifetime>) -> Result<()> {
+    let parent_exit = async {
+        match parent {
+            Some(parent) => parent.wait().await,
+            None => std::future::pending::<()>().await,
+        }
+    };
+    tokio::select! {
+        signal = external_shutdown_signal() => signal,
+        _ = parent_exit => Ok(()),
+    }
+}
+
 #[cfg(unix)]
-async fn shutdown_signal() -> Result<()> {
+async fn external_shutdown_signal() -> Result<()> {
     use tokio::signal::unix::{SignalKind, signal};
 
     let mut terminate = signal(SignalKind::terminate())
@@ -480,7 +594,7 @@ async fn shutdown_signal() -> Result<()> {
 }
 
 #[cfg(not(unix))]
-async fn shutdown_signal() -> Result<()> {
+async fn external_shutdown_signal() -> Result<()> {
     tokio::signal::ctrl_c()
         .await
         .map_err(|_| Error("cannot install interrupt signal handler".into()))
@@ -531,6 +645,139 @@ mod tests {
         ]
         .map(str::to_owned);
         assert!(validate_arguments(&extra_listener).is_err());
+    }
+
+    #[test]
+    fn parent_pid_requires_a_single_positive_process_id() {
+        assert_eq!(parse_parent_pid("1234").unwrap(), 1234);
+        for value in ["", "0", "-1", "+1", "1.5", "abc", "2147483648"] {
+            assert!(parse_parent_pid(value).is_err(), "accepted {value:?}");
+            let args = ["--parent-pid", value].map(str::to_owned);
+            assert!(validate_arguments(&args).is_err());
+        }
+        assert!(validate_arguments(&["--parent-pid".into()]).is_err());
+        let duplicate = ["--parent-pid", "123", "--parent-pid", "123"].map(str::to_owned);
+        assert!(validate_arguments(&duplicate).is_err());
+        assert!(validate_arguments(&["--parent-pid".into(), "1234".into()]).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parent_pid_cannot_claim_an_unrelated_process() {
+        let actual_parent = current_parent_pid().unwrap();
+        let unrelated = if actual_parent == 1 { 2 } else { 1 };
+        assert!(ParentLifetime::start(unrelated).is_err());
+        assert!(ParentLifetime::start(actual_parent).is_ok());
+    }
+
+    #[cfg(unix)]
+    fn run_parent_watchdog_fixture(mode: &str) -> (std::process::Output, Duration) {
+        let directory = std::env::temp_dir().join(format!(
+            "ec-engine-parent-test-{}-{}-{mode}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let started = Instant::now();
+        // The intermediary inherits this pipe into its child, so output waits
+        // for the orphaned engine fixture to close it as well.
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::parent_watchdog_fixture",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("EC_ENGINE_PARENT_WATCHDOG_MODE", format!("parent-{mode}"))
+            .env("EC_ENGINE_PARENT_WATCHDOG_READY", directory.join("ready"))
+            .output()
+            .unwrap();
+        let elapsed = started.elapsed();
+        std::fs::remove_dir_all(directory).unwrap();
+        (output, elapsed)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parent_monitor_observes_a_real_parent_exit() {
+        let (output, elapsed) = run_parent_watchdog_fixture("graceful");
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("desktop parent exited"));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("parent shutdown requested"), "{stdout}");
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "shutdown took {elapsed:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parent_watchdog_bounds_exit_during_a_blocking_operation() {
+        let (output, elapsed) = run_parent_watchdog_fixture("blocked");
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("desktop parent exited"));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("blocking operation started"), "{stdout}");
+        assert!(!stdout.contains("blocking operation returned"), "{stdout}");
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "shutdown took {elapsed:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "subprocess helper for parent watchdog integration tests"]
+    fn parent_watchdog_fixture() {
+        let Ok(mode) = std::env::var("EC_ENGINE_PARENT_WATCHDOG_MODE") else {
+            return;
+        };
+        let ready = std::env::var_os("EC_ENGINE_PARENT_WATCHDOG_READY").unwrap();
+        if let Some(child_mode) = mode.strip_prefix("parent-") {
+            let _child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tests::parent_watchdog_fixture",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env("EC_ENGINE_PARENT_WATCHDOG_MODE", child_mode)
+                .env(
+                    "EC_ENGINE_PARENT_WATCHDOG_EXPECTED_PID",
+                    std::process::id().to_string(),
+                )
+                .stdin(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !Path::new(&ready).exists() {
+                assert!(Instant::now() < deadline, "child watchdog did not start");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            // Exiting without waiting simulates Force Quit of the GUI parent.
+            std::process::exit(0);
+        }
+        let expected_parent = std::env::var("EC_ENGINE_PARENT_WATCHDOG_EXPECTED_PID")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let parent = ParentLifetime::start(expected_parent).unwrap();
+        if mode == "blocked" {
+            println!("blocking operation started");
+            std::fs::write(&ready, b"ready").unwrap();
+            std::thread::sleep(Duration::from_secs(15));
+            println!("blocking operation returned");
+        } else {
+            std::fs::write(&ready, b"ready").unwrap();
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(parent.wait());
+            println!("parent shutdown requested");
+        }
     }
 
     #[test]

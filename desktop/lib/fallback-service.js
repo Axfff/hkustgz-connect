@@ -236,6 +236,91 @@ function fallbackServiceState({
   };
 }
 
+function assertRefreshFilePermissions(file, label, uid, { packaged = false } = {}) {
+  assertRegularFile(file, label, { required: true });
+  const stat = fs.statSync(file);
+  if (stat.uid !== uid && (!packaged || stat.uid !== 0)) {
+    throw new Error(`${label} must be owned by the current user${packaged ? ' or root' : ''}`);
+  }
+  if (stat.mode & 0o022) throw new Error(`${label} must not be writable by other users`);
+}
+
+function matchesManagedLaunchAgent(plist, executable) {
+  const source = String(plist).replace(/<!--[\s\S]*?-->/g, '');
+  const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const labels = source.match(/<key>\s*Label\s*<\/key>/g) || [];
+  const argumentsKeys = source.match(/<key>\s*ProgramArguments\s*<\/key>/g) || [];
+  return labels.length === 1 && argumentsKeys.length === 1
+    && !/<key>\s*Program\s*<\/key>/.test(source)
+    && new RegExp(`<key>\\s*Label\\s*</key>\\s*<string>${escape(FALLBACK_LABEL)}</string>`).test(source)
+    && new RegExp(`<key>\\s*ProgramArguments\\s*</key>\\s*<array>\\s*<string>${escape(xml(executable))}</string>`).test(source);
+}
+
+async function refreshFallbackServiceBinary({
+  source,
+  executable,
+  launchAgent,
+  uid = process.getuid?.(),
+  platform = process.platform,
+  run = execFile,
+}) {
+  if (platform !== 'darwin' || !Number.isInteger(uid)
+    || !fallbackServiceState({ executable, launchAgent, platform }).installed) {
+    return { updated: false };
+  }
+  assertRefreshFilePermissions(executable, 'Installed relay', uid);
+  assertRefreshFilePermissions(launchAgent, 'Relay LaunchAgent', uid);
+  const previousLaunchAgent = snapshotFile(launchAgent, 'Relay LaunchAgent');
+  if (!matchesManagedLaunchAgent(previousLaunchAgent.content, executable)) {
+    return { updated: false };
+  }
+  assertRefreshFilePermissions(source, 'Packaged relay', uid, { packaged: true });
+  const previousExecutable = snapshotFile(executable, 'Installed relay');
+  if (previousExecutable.content.equals(fs.readFileSync(source))) return { updated: false };
+
+  const service = `gui/${uid}/${FALLBACK_LABEL}`;
+  let previousServiceLoaded;
+  try {
+    previousServiceLoaded = await launchAgentIsLoaded(run, service);
+  } catch (error) {
+    throw new Error(`Could not inspect the compatibility relay LaunchAgent: ${error.message}`);
+  }
+  let replaced = false;
+  try {
+    copyExecutableAtomic(source, executable);
+    replaced = true;
+    if (previousServiceLoaded) {
+      // Keep the independent launchd job loaded even if the GUI is force-quit
+      // during this upgrade; its next start uses the atomically replaced binary.
+      await runCommand(run, '/bin/launchctl', ['kickstart', '-k', service]);
+      if (!await launchAgentIsLoaded(run, service)) {
+        throw new Error('launchctl did not report the compatibility relay as loaded');
+      }
+    }
+  } catch (error) {
+    let rollbackError = null;
+    try {
+      if (replaced) restoreSnapshot(executable, previousExecutable, 'Installed relay');
+      if (previousServiceLoaded) {
+        const loaded = await launchAgentIsLoaded(run, service);
+        if (!loaded) {
+          await runCommand(run, '/bin/launchctl', ['bootstrap', `gui/${uid}`, launchAgent]);
+        } else if (replaced) {
+          await runCommand(run, '/bin/launchctl', ['kickstart', '-k', service]);
+        }
+        if (!await launchAgentIsLoaded(run, service)) {
+          throw new Error('launchctl did not restore the previous compatibility relay');
+        }
+      }
+    } catch (rollback) {
+      rollbackError = rollback;
+    }
+    const suffix = rollbackError ? `; previous relay restore also failed: ${rollbackError.message}` : '';
+    throw new Error(`Could not refresh the compatibility relay: ${error.message}${suffix}`);
+  }
+  return { updated: true };
+}
+
 async function installFallbackService({
   source,
   executable,
@@ -344,6 +429,7 @@ module.exports = {
   parseDefaultInterface,
   parseLaunchAgentConfiguration,
   physicalInterfaceIsActive,
+  refreshFallbackServiceBinary,
   removeFallbackService,
   renderLaunchAgent,
   validatePorts,

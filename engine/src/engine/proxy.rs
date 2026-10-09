@@ -28,7 +28,7 @@ pub struct SystemDnsResolver;
 /// 198.18.0.0/15 is reserved for benchmarking and is commonly used by
 /// fake-IP TUN proxies. It cannot be a real campus destination and must not be
 /// injected into the independent VPN data plane.
-pub(crate) fn is_synthetic_fake_ipv4(address: Ipv4Addr) -> bool {
+pub fn is_synthetic_fake_ipv4(address: Ipv4Addr) -> bool {
     let octets = address.octets();
     octets[0] == 198 && matches!(octets[1], 18 | 19)
 }

@@ -63,6 +63,22 @@ ad-hoc signature as notarization. A stable Developer ID signature is also
 required for macOS to recognize updated builds as the same application when
 authorizing Electron `safeStorage` access to Keychain.
 
+## App lifecycle contract
+
+GitHub builds disable relay-driven app lifecycle automation by default. A local
+campus-aware relay configuration must explicitly opt in with
+`auto_launch: true`. Even after opt-in, manual **Quit**, Activity Monitor
+**Quit** or **Force Quit**, and an app crash prevent automatic reopening until
+the user deliberately opens the app again. Network changes, sleep, and relay
+restarts must preserve this decision.
+
+Register the durable `app-session.json` before asynchronous startup work or
+password access. The relay must distinguish its own session-tagged
+`campus-shutdown.json` request from a manual or abrupt exit. The GUI-owned
+engine must stop when its parent disappears, without terminating an engine
+owned by the CLI or another interface. See [Campus-aware relay](CAMPUS_AUTO_ROUTING.md)
+for configuration and live checks.
+
 ## Release checklist
 
 1. Update versions in the root, desktop, and engine manifests; update the
@@ -72,7 +88,9 @@ authorizing Electron `safeStorage` access to Keychain.
 4. Package and verify the app and CLI archive. Confirm both contain `LICENSE`,
    `LICENSES/`, `NOTICE.md`, `PROVENANCE.md`, and `THIRD_PARTY_NOTICES.md`; the
    desktop must also contain Electron and Chromium notices.
-5. Run approved coexistence canaries in both start orders.
+5. Run approved coexistence canaries in both start orders. Verify manual Quit
+   and Force Quit remain respected across relay/network restarts; confirm a
+   tagged campus shutdown still permits an automatic off-campus reopen.
 6. Run `doctor-public` with Shadowrocket active and record the system/TUN and
    explicit primary SOCKS HTTPS results separately. If repair is indicated by a
    system/TUN failure and primary SOCKS success, install it and verify sustained

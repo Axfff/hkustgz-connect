@@ -47,6 +47,17 @@ the original Tailscale copyright and the GeiserX fork-modification copyright.
 The exact notice shipped with the reviewed repository commit is reproduced in
 `LICENSES/BSD-3-Clause-GeiserX-tailscale-rs.txt`.
 
+## Desktop runtime and packaging
+
+Version 1.4.1 updates the existing Electron runtime to `43.7.9` and resolves
+the existing electron-builder dependency to `26.17.0`. Compatible transitive
+security patches and the existing build overrides are recorded with their
+integrity hashes in `desktop/package-lock.json`; no additional upstream source
+was imported for the app lifecycle changes. Electron's MIT license and its
+Chromium third-party notices are copied from the exact runtime into the
+packaged application's `legal/electron/` directory as described in
+`THIRD_PARTY_NOTICES.md`.
+
 ## Evidence and future changes
 
 - Preserve the upstream identifiers and license files in every release.

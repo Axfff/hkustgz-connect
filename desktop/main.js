@@ -11,6 +11,7 @@ const { loadSettings: readSettings, saveSettings: writeSettings } = require('./l
 const { applySettingsPatch } = require('./lib/settings-update');
 const { planEngineSettingsUpdate } = require('./lib/engine-settings-update');
 const { PasswordSession } = require('./lib/credential-store');
+const { AppLifecycle } = require('./lib/app-lifecycle');
 const { classifyEngineOutput, engineLifecycleSignal } = require('./lib/engine-output');
 const { DEFAULT_ROUTE_DOMAINS, buildPac } = require('./lib/pac');
 const {
@@ -34,7 +35,7 @@ const { renderMihomoProfile } = require('./lib/mihomo-profile');
 const { openNetworkGuide } = require('./lib/network-guides');
 const {
   FALLBACK_LABEL, fallbackServiceState, installFallbackService, removeFallbackService,
-  validatePorts,
+  refreshFallbackServiceBinary, validatePorts,
 } = require('./lib/fallback-service');
 const {
   acquireRelayOperationLock, relayOperationLockPath,
@@ -48,11 +49,33 @@ const {
 } = require('./lib/tunnel-health');
 
 // ---------- single instance (avoid the app fighting its own session) ----------
+const automaticCampusLaunch = process.argv.includes('--campus-auto');
+const appLifecycle = new AppLifecycle({
+  directory: path.join(process.env.XDG_CONFIG_HOME || path.join(app.getPath('home'), '.config'), 'hkustgz-connect'),
+  enabled: process.platform === 'darwin',
+});
+const priorAutomaticLaunchAllowed = appLifecycle.automaticLaunchAllowed();
+// A pending relay launch may race with a manual exit. Stop it before touching
+// settings or credentials, even if the relay had already called `open`.
+if (automaticCampusLaunch && !priorAutomaticLaunchAllowed) {
+  app.quit();
+  return;
+}
 // `app.quit()` does not stop the rest of this module from running, so return
 // before a second instance touches the shared settings, credential, and log
 // files that the first instance owns.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
+  return;
+}
+try {
+  if (!appLifecycle.beginSession({ automatic: automaticCampusLaunch })) {
+    app.quit();
+    return;
+  }
+} catch (error) {
+  console.error('Could not record app startup:', error.message);
+  app.exit(1);
   return;
 }
 app.setName('HKUST(GZ) Connect');
@@ -87,6 +110,8 @@ for (const privateFile of [SETTINGS, CRED, LOG, PAC_FILE, POLICY]) {
 let win = null;
 let tray = null;
 let isQuitting = false;
+let manualQuit = false;
+let startupAdmitted = false;
 let closePromptOpen = false;
 let engine = null;
 let externalEnginePid = null;
@@ -358,6 +383,7 @@ async function connectOnce(isRetry) {
     '--credentials-stdin',
     '--socks-bind', `127.0.0.1:${Number(s.port)}`,
   ];
+  if (process.platform !== 'win32') engineArguments.push('--parent-pid', String(process.pid));
   if (fs.existsSync(POLICY)) engineArguments.push('--local-policy', POLICY);
   engine = spawn(bin, engineArguments, { stdio: ['pipe', 'pipe', 'pipe'] });
   externalEnginePid = null;
@@ -1224,6 +1250,7 @@ function rememberCloseAction(action) {
 
 function requestQuit() {
   if (isQuitting) return;
+  manualQuit = true;
   isQuitting = true;
   app.quit();
 }
@@ -1322,7 +1349,7 @@ function installApplicationMenu() {
         { role: 'hideOthers', label: 'Hide Others' },
         { role: 'unhide', label: 'Show All' },
         { type: 'separator' },
-        { role: 'quit', label: 'Quit HKUST(GZ) Connect' },
+        { label: 'Quit HKUST(GZ) Connect', accelerator: 'Command+Q', click: requestQuit },
       ],
     },
     {
@@ -1348,7 +1375,17 @@ function installApplicationMenu() {
 }
 
 app.on('second-instance', showWindow);
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  const settings = loadSettings();
+  let openedAtLogin = false;
+  if (process.platform === 'darwin') {
+    try { openedAtLogin = app.getLoginItemSettings().wasOpenedAtLogin === true; } catch {}
+  }
+  if (openedAtLogin && !priorAutomaticLaunchAllowed) {
+    app.quit();
+    return;
+  }
+  startupAdmitted = true;
   if (process.platform === 'darwin' && app.dock) app.dock.hide();
   installApplicationMenu();
   // A PAC write can fail on a read-only or full user-data directory. That must
@@ -1360,22 +1397,45 @@ app.whenReady().then(() => {
     state.lastError = `无法写入 PAC 文件：${error.message}`;
   }
   createTray();
-  const settings = loadSettings();
   updateLoginItem(settings.startAtLogin);
-  let openedAtLogin = false;
-  if (process.platform === 'darwin') {
-    try { openedAtLogin = app.getLoginItemSettings().wasOpenedAtLogin === true; } catch {}
-  }
   createWindow({ show: !openedAtLogin });
-  if (settings.autoConnect !== false) setTimeout(() => connect(), 500);
+  try {
+    if (process.platform === 'darwin' && fallbackState().installed) {
+      await withFallbackMutation(() => refreshFallbackServiceBinary({
+        source: fallbackHelperSourcePath(),
+        executable: FALLBACK_HELPER,
+        launchAgent: FALLBACK_PLIST,
+      }));
+    }
+  } catch (error) {
+    state.lastError = `Could not update the compatibility relay: ${error.message}`;
+    emit();
+    return;
+  }
+  if (!isQuitting && settings.autoConnect !== false) {
+    setTimeout(() => { if (!isQuitting) void connect(); }, 500);
+  }
   app.on('activate', showWindow);
 }).catch((error) => {
   dialog.showErrorBox('HKUST(GZ) Connect 启动失败', String(error && error.message ? error.message : error));
   app.exit(1);
 });
 app.on('window-all-closed', () => { /* Keep the tray process alive. */ });
+// Activity Monitor Quit is always a manual stop. The relay uses a distinct
+// signal and a session-matched request for its planned campus shutdown.
+process.on('SIGTERM', () => app.quit());
+process.on('SIGUSR2', () => {
+  // A login startup still awaiting admission cannot override a prior stop.
+  if (startupAdmitted) appLifecycle.acceptRelayShutdown();
+  app.quit();
+});
 app.on('before-quit', () => {
   isQuitting = true;
+  try { appLifecycle.finishSession({ manual: manualQuit }); }
+  catch (error) {
+    // The existing running record still inhibits launch if finalization fails.
+    console.error('Could not record app shutdown:', error.message);
+  }
   disconnect();
   if (tray && !tray.isDestroyed()) tray.destroy();
   tray = null;

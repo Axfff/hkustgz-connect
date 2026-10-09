@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.4.1 - 2026-10-09
+
+- Made manual app exit persistent: **Quit**, Activity Monitor **Quit** or
+  **Force Quit**, and an app crash prevent the relay from reopening the app
+  across network changes, sleep, and relay restarts until a deliberate reopen.
+- Recorded app sessions before startup so an abrupt exit remains detectable
+  even when a quit handler cannot run. Only a tagged relay-requested campus
+  shutdown preserves automatic reopening.
+- Stopped the GUI-owned engine when its parent app disappears, preserving
+  shared engines started by the CLI or another owner.
+- Kept relay-driven app launch disabled by default. Campus-aware lifecycle
+  automation requires explicit local opt-in and always honors manual stops.
+- Updated an existing app-owned compatibility relay on startup while preserving
+  its configuration and whether its service was running or stopped.
+- Added optional campus-aware direct routing with physical-interface campus
+  validation and documented its setup and verification limits.
+- Updated Electron and compatible build dependencies; the existing
+  high-severity dependency audit passes.
+
 ## 1.4.0 - 2026-08-24
 
 - Added a dedicated **Network compatibility** surface for PAC, Shadowrocket,

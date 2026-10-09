@@ -172,6 +172,7 @@ pub struct VpnDnsResolver {
 pub struct DirectDnsResolver {
     servers: Vec<Ipv4Addr>,
     timeout: Duration,
+    interface: Option<std::num::NonZeroU32>,
     cache: DnsCache,
     in_flight: SingleFlight,
 }
@@ -190,9 +191,18 @@ impl DirectDnsResolver {
         Ok(Self {
             servers,
             timeout,
+            interface: None,
             cache: DnsCache::default(),
             in_flight: SingleFlight::default(),
         })
+    }
+
+    /// Scope campus DNS to the physical interface, outside a primary proxy TUN.
+    /// Create a new resolver after a network change so cached answers cannot
+    /// carry over from a previous campus or physical interface.
+    pub fn with_interface(mut self, interface: std::num::NonZeroU32) -> Self {
+        self.interface = Some(interface);
+        self
     }
 
     async fn resolve(&self, host: &str) -> Result<Ipv4Addr> {
@@ -210,10 +220,11 @@ impl DirectDnsResolver {
             .servers
             .iter()
             .map(|server| {
-                query_direct_endpoint(
+                query_direct_endpoint_on_interface(
                     host.to_owned(),
                     SocketAddr::new(IpAddr::V4(*server), DNS_PORT),
                     self.timeout,
+                    self.interface,
                 )
             })
             .collect::<Vec<_>>();
@@ -330,10 +341,20 @@ async fn query_one_server(
     VpnDnsResolver::resolve_with_server(&netstack, &host, server, timeout).await
 }
 
+#[cfg(test)]
 async fn query_direct_endpoint(
     host: String,
     endpoint: SocketAddr,
     timeout: Duration,
+) -> Result<(Ipv4Addr, u32)> {
+    query_direct_endpoint_on_interface(host, endpoint, timeout, None).await
+}
+
+async fn query_direct_endpoint_on_interface(
+    host: String,
+    endpoint: SocketAddr,
+    timeout: Duration,
+    interface: Option<std::num::NonZeroU32>,
 ) -> Result<(Ipv4Addr, u32)> {
     let mut id_bytes = [0_u8; 2];
     OsRng.fill_bytes(&mut id_bytes);
@@ -342,6 +363,15 @@ async fn query_direct_endpoint(
     let socket = tokio::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))
         .await
         .map_err(|_| Error("direct DNS socket bind failed".into()))?;
+    if let Some(interface) = interface {
+        #[cfg(target_os = "macos")]
+        socket2::SockRef::from(&socket).bind_device_by_index_v4(Some(interface))?;
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = interface;
+            return Err(Error("physical DNS scoping requires macOS".into()));
+        }
+    }
     socket
         .connect(endpoint)
         .await

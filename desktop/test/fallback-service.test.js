@@ -12,6 +12,7 @@ const {
   parseDefaultInterface,
   parseLaunchAgentConfiguration,
   physicalInterfaceIsActive,
+  refreshFallbackServiceBinary,
   removeFallbackService,
   renderLaunchAgent,
   validatePorts,
@@ -33,15 +34,37 @@ function unloadedServiceError() {
   return error;
 }
 
+function managedFixture(t) {
+  const paths = fixture(t);
+  fs.mkdirSync(path.dirname(paths.executable), { recursive: true });
+  fs.mkdirSync(path.dirname(paths.launchAgent), { recursive: true });
+  fs.writeFileSync(paths.executable, 'previous relay', { mode: 0o750 });
+  const plist = renderLaunchAgent({
+    executable: paths.executable,
+    upstreamPort: 2080,
+    primaryProxyPort: 3080,
+    directInterface: 'en9',
+  }).replace('  </dict>', [
+    '    <key>StandardOutPath</key><string>/tmp/custom-relay.log</string>',
+    '    <key>EnvironmentVariables</key><dict><key>CUSTOM</key><string>kept</string></dict>',
+    '  </dict>',
+  ].join('\n'));
+  fs.writeFileSync(paths.launchAgent, plist, { mode: 0o640 });
+  return { paths, plist };
+}
+
 function runner(calls, {
   loaded = false,
   defaultInterface = 'en7',
   activeInterfaces = ['en7'],
   failBootstrapAt = null,
+  failKickstartAt = null,
+  unloadOnKickstartAt = null,
   bootoutError = null,
 } = {}) {
   let serviceLoaded = loaded;
   let bootstrapCalls = 0;
+  let kickstartCalls = 0;
   const run = (command, args, _options, callback) => {
     calls.push([command, ...args]);
     if (command === '/sbin/route') return callback(null, `   interface: ${defaultInterface}\n`);
@@ -65,10 +88,17 @@ function runner(calls, {
       serviceLoaded = true;
       return callback(null, '');
     }
+    if (command === '/bin/launchctl' && args[0] === 'kickstart') {
+      kickstartCalls += 1;
+      if (kickstartCalls === failKickstartAt) return callback(new Error('kickstart rejected'));
+      if (kickstartCalls === unloadOnKickstartAt) serviceLoaded = false;
+      return callback(null, '');
+    }
     return callback(null, '');
   };
   run.isLoaded = () => serviceLoaded;
   run.bootstrapCalls = () => bootstrapCalls;
+  run.kickstartCalls = () => kickstartCalls;
   return run;
 }
 
@@ -313,4 +343,162 @@ test('relay removal validates managed files before stopping the service', async 
     /regular file/,
   );
   assert.equal(calls.some((call) => call[0] === '/bin/launchctl'), false);
+});
+
+test('relay binary refresh does not install or load an uninstalled service', async (t) => {
+  const paths = fixture(t);
+  const calls = [];
+  assert.deepEqual(await refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'darwin', run: runner(calls),
+  }), { updated: false });
+  assert.equal(fs.existsSync(paths.executable), false);
+  assert.equal(fs.existsSync(paths.launchAgent), false);
+  assert.deepEqual(calls, []);
+});
+
+test('relay binary refresh restarts a loaded helper and preserves the complete plist', async (t) => {
+  const { paths, plist } = managedFixture(t);
+  const calls = [];
+  const run = runner(calls, { loaded: true });
+  assert.deepEqual(await refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'darwin', run,
+  }), { updated: true });
+  assert.equal(fs.readFileSync(paths.executable, 'utf8'), 'relay');
+  assert.equal(fs.statSync(paths.executable).mode & 0o777, 0o755);
+  assert.equal(fs.readFileSync(paths.launchAgent, 'utf8'), plist);
+  assert.equal(fs.statSync(paths.launchAgent).mode & 0o777, 0o640);
+  assert.equal(run.isLoaded(), true);
+  assert.deepEqual(calls.filter((call) => call[1] !== 'print'), [
+    ['/bin/launchctl', 'kickstart', '-k', `gui/${process.getuid()}/${FALLBACK_LABEL}`],
+  ]);
+});
+
+test('relay binary refresh keeps a previously unloaded helper unloaded', async (t) => {
+  const { paths, plist } = managedFixture(t);
+  const calls = [];
+  const run = runner(calls);
+  assert.deepEqual(await refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'darwin', run,
+  }), { updated: true });
+  assert.equal(fs.readFileSync(paths.executable, 'utf8'), 'relay');
+  assert.equal(fs.readFileSync(paths.launchAgent, 'utf8'), plist);
+  assert.equal(fs.statSync(paths.launchAgent).mode & 0o777, 0o640);
+  assert.equal(run.isLoaded(), false);
+  assert.deepEqual(calls.map((call) => call[1]), ['print']);
+});
+
+test('relay binary refresh leaves matching bytes and unsupported platforms alone', async (t) => {
+  const { paths, plist } = managedFixture(t);
+  const calls = [];
+  fs.copyFileSync(paths.source, paths.executable);
+  assert.deepEqual(await refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'darwin', run: runner(calls, { loaded: true }),
+  }), { updated: false });
+  assert.deepEqual(await refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'linux', run: runner(calls),
+  }), { updated: false });
+  assert.equal(fs.readFileSync(paths.launchAgent, 'utf8'), plist);
+  assert.deepEqual(calls, []);
+});
+
+test('failed relay binary refresh restores the previous bytes, modes and loaded service', async (t) => {
+  const { paths, plist } = managedFixture(t);
+  const calls = [];
+  const run = runner(calls, { loaded: true, failKickstartAt: 1 });
+  await assert.rejects(refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'darwin', run,
+  }), /Could not refresh.*kickstart rejected/);
+  assert.equal(fs.readFileSync(paths.executable, 'utf8'), 'previous relay');
+  assert.equal(fs.statSync(paths.executable).mode & 0o777, 0o750);
+  assert.equal(fs.readFileSync(paths.launchAgent, 'utf8'), plist);
+  assert.equal(fs.statSync(paths.launchAgent).mode & 0o777, 0o640);
+  assert.equal(run.isLoaded(), true);
+  assert.deepEqual(calls.filter((call) => call[1] !== 'print').map((call) => call[1]), [
+    'kickstart', 'kickstart',
+  ]);
+});
+
+test('relay binary refresh restores the old helper if kickstart unexpectedly loses the job', async (t) => {
+  const { paths, plist } = managedFixture(t);
+  const calls = [];
+  const run = runner(calls, { loaded: true, unloadOnKickstartAt: 1 });
+  await assert.rejects(refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'darwin', run,
+  }), /did not report.*loaded/);
+  assert.equal(fs.readFileSync(paths.executable, 'utf8'), 'previous relay');
+  assert.equal(fs.readFileSync(paths.launchAgent, 'utf8'), plist);
+  assert.equal(run.isLoaded(), true);
+  assert.deepEqual(calls.filter((call) => call[1] !== 'print').map((call) => call[1]), [
+    'kickstart', 'bootstrap',
+  ]);
+});
+
+test('a caller interrupted while awaiting kickstart cannot strand the relay unloaded', async (t) => {
+  const { paths, plist } = managedFixture(t);
+  const calls = [];
+  const delegate = runner(calls, { loaded: true });
+  let finishKickstart;
+  let reachedKickstart;
+  const kickstartPending = new Promise((resolve) => { reachedKickstart = resolve; });
+  const run = (command, args, options, callback) => {
+    if (args[0] === 'kickstart') {
+      calls.push([command, ...args]);
+      finishKickstart = callback;
+      reachedKickstart();
+      return;
+    }
+    delegate(command, args, options, callback);
+  };
+  const updating = refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'darwin', run,
+  });
+  await kickstartPending;
+  // The GUI may disappear here, so launchd must already retain the loaded job.
+  assert.equal(delegate.isLoaded(), true);
+  assert.equal(fs.readFileSync(paths.executable, 'utf8'), 'relay');
+  assert.equal(fs.readFileSync(paths.launchAgent, 'utf8'), plist);
+  assert.equal(calls.some((call) => ['bootout', 'bootstrap'].includes(call[1])), false);
+  finishKickstart(null, '');
+  assert.deepEqual(await updating, { updated: true });
+});
+
+test('relay binary refresh requires an exact managed label and program path', async (t) => {
+  const { paths, plist } = managedFixture(t);
+  const calls = [];
+  // The expected path exists in a comment but is not the executable launchd runs.
+  fs.writeFileSync(paths.launchAgent, plist.replace(
+    `<string>${paths.executable}</string>`, '<string>/tmp/another-helper</string>',
+  ).replace('  <dict>', `  <!-- ${paths.executable} -->\n  <dict>`));
+  assert.equal(fallbackServiceState({ ...paths, platform: 'darwin' }).installed, true);
+  assert.deepEqual(await refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'darwin', run: runner(calls),
+  }), { updated: false });
+  fs.writeFileSync(paths.launchAgent, plist.replace(FALLBACK_LABEL, 'com.example.other'));
+  assert.deepEqual(await refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'darwin', run: runner(calls),
+  }), { updated: false });
+  assert.equal(fs.readFileSync(paths.executable, 'utf8'), 'previous relay');
+  assert.deepEqual(calls, []);
+});
+
+test('relay binary refresh rejects symlinked sources and files writable by other users', async (t) => {
+  const { paths } = managedFixture(t);
+  const calls = [];
+  const run = runner(calls);
+  const packagedLink = `${paths.source}-link`;
+  fs.symlinkSync(paths.source, packagedLink);
+  await assert.rejects(refreshFallbackServiceBinary({
+    ...paths, source: packagedLink, uid: process.getuid(), platform: 'darwin', run,
+  }), /regular file/);
+  fs.chmodSync(paths.executable, 0o777);
+  await assert.rejects(refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'darwin', run,
+  }), /writable by other users/);
+  fs.chmodSync(paths.executable, 0o755);
+  fs.chmodSync(paths.launchAgent, 0o666);
+  await assert.rejects(refreshFallbackServiceBinary({
+    ...paths, uid: process.getuid(), platform: 'darwin', run,
+  }), /writable by other users/);
+  assert.equal(fs.readFileSync(paths.executable, 'utf8'), 'previous relay');
+  assert.deepEqual(calls, []);
 });

@@ -11,6 +11,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::Semaphore;
 
+#[path = "ec_fallback/campus.rs"]
+mod campus;
+
 const SOCKS_VERSION: u8 = 5;
 const NO_AUTH: u8 = 0;
 const CONNECT: u8 = 1;
@@ -63,6 +66,10 @@ async fn run() -> Result<()> {
         .map_err(|_| Error("--general-upstream must be a socket address".into()))?;
     let direct_interface_name = argument(&args, "--direct-interface")?;
     let direct_interface = interface_index(direct_interface_name)?;
+    let campus = campus::CampusRouting::load()?;
+    if let Some(campus) = &campus {
+        tokio::spawn(Arc::clone(campus).run());
+    }
     if !listen.ip().is_loopback()
         || !upstream.ip().is_loopback()
         || general_upstream.is_some_and(|address| !address.ip().is_loopback())
@@ -94,6 +101,7 @@ async fn run() -> Result<()> {
             continue;
         };
         let resolver = Arc::clone(&resolver);
+        let campus = campus.clone();
         tokio::spawn(async move {
             let _slot = slot;
             if let Err(error) = handle(
@@ -102,6 +110,7 @@ async fn run() -> Result<()> {
                 general_upstream,
                 direct_interface,
                 resolver.as_ref(),
+                campus.as_deref(),
             )
             .await
             {
@@ -146,31 +155,20 @@ async fn handle(
     general_upstream: Option<SocketAddr>,
     direct_interface: NonZeroU32,
     resolver: &dyn NameResolver,
+    campus: Option<&campus::CampusRouting>,
 ) -> Result<()> {
     let target = tokio::time::timeout(HANDSHAKE_TIMEOUT, read_request(&mut client))
         .await
         .map_err(|_| Error("fallback SOCKS handshake timed out".into()))??;
-    let routed = match classify_target(&target) {
-        TargetClass::CampusDomain => {
-            match tokio::time::timeout(UPSTREAM_TIMEOUT, via_upstream(upstream, &target)).await {
-                Ok(Ok(stream)) => Ok(stream),
-                _ => via_direct(&target, direct_interface, resolver).await,
-            }
-        }
-        TargetClass::PrivateLiteral => {
-            tokio::time::timeout(UPSTREAM_TIMEOUT, via_upstream(upstream, &target))
-                .await
-                .map_err(|_| Error("campus SOCKS connection timed out".into()))?
-        }
-        TargetClass::General => match general_upstream {
-            Some(address) => tokio::time::timeout(DIRECT_TIMEOUT, via_upstream(address, &target))
-                .await
-                .map_err(|_| Error("general SOCKS connection timed out".into()))?,
-            None => Err(Error(
-                "non-campus destination requires --general-upstream".into(),
-            )),
-        },
-    };
+    let routed = route_target(
+        &target,
+        upstream,
+        general_upstream,
+        direct_interface,
+        resolver,
+        campus,
+    )
+    .await;
     let mut remote = match routed {
         Ok(stream) => stream,
         Err(error) => {
@@ -193,6 +191,77 @@ async fn handle(
             Ok(())
         }
         Err(_) => Err(Error("fallback stream forwarding failed".into())),
+    }
+}
+
+async fn route_target(
+    target: &Target,
+    upstream: SocketAddr,
+    general_upstream: Option<SocketAddr>,
+    mut direct_interface: NonZeroU32,
+    resolver: &dyn NameResolver,
+    campus: Option<&campus::CampusRouting>,
+) -> Result<TcpStream> {
+    if let Some(campus) = campus {
+        let allowed = match target.literal {
+            Some(ip) => campus.policy.allows_ipv4(ip),
+            None => campus.policy.allows_domain(&target.host),
+        };
+        if target.literal.is_some_and(is_private_destination) && !allowed {
+            return Err(Error(
+                "private destination is outside the local campus policy".into(),
+            ));
+        }
+        if let Some(network) = campus.network().await {
+            direct_interface = network.interface;
+            if allowed && network.on_campus {
+                let address = match target.literal {
+                    Some(ip) => Ok(ip),
+                    None => network.resolver.resolve_ipv4(&target.host).await,
+                };
+                if let Ok(ip) = address {
+                    if !ip.is_loopback()
+                        && !ip.is_link_local()
+                        && !ip.is_unspecified()
+                        && !ip.is_multicast()
+                        && !ip.is_broadcast()
+                        && !ec_compat::engine::proxy::is_synthetic_fake_ipv4(ip)
+                    {
+                        if let Ok(stream) = campus::connect_bound(
+                            ip,
+                            target.port,
+                            network.interface,
+                            Duration::from_secs(3),
+                        )
+                        .await
+                        {
+                            return Ok(stream);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    match classify_target(target) {
+        TargetClass::CampusDomain => {
+            match tokio::time::timeout(UPSTREAM_TIMEOUT, via_upstream(upstream, target)).await {
+                Ok(Ok(stream)) => Ok(stream),
+                _ => via_direct(target, direct_interface, resolver).await,
+            }
+        }
+        TargetClass::PrivateLiteral => {
+            tokio::time::timeout(UPSTREAM_TIMEOUT, via_upstream(upstream, target))
+                .await
+                .map_err(|_| Error("campus SOCKS connection timed out".into()))?
+        }
+        TargetClass::General => match general_upstream {
+            Some(address) => tokio::time::timeout(DIRECT_TIMEOUT, via_upstream(address, target))
+                .await
+                .map_err(|_| Error("general SOCKS connection timed out".into()))?,
+            None => Err(Error(
+                "non-campus destination requires --general-upstream".into(),
+            )),
+        },
     }
 }
 

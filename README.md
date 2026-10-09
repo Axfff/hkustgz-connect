@@ -40,8 +40,8 @@ for the exact PAC, SSH, Shadowrocket, Mihomo, and Tailscale paths.
 The [release page](https://github.com/Axfff/hkustgz-connect/releases/latest)
 contains:
 
-- `hkustgzconnect-1.4.0-mac-arm64.dmg` for the menu-bar app;
-- `hkustgz-connect-cli-1.4.0-macos-arm64.tar.gz` for the CLI;
+- `hkustgzconnect-1.4.1-mac-arm64.dmg` for the menu-bar app;
+- `hkustgz-connect-cli-1.4.1-macos-arm64.tar.gz` for the CLI;
 - `SHA256SUMS.txt` for verification.
 
 The current binary release supports Apple silicon Macs. Intel and other
@@ -56,6 +56,17 @@ platforms can build the engine from source, but are not release-tested yet.
 The community build is ad-hoc signed, not Apple-notarized. On first launch,
 right-click the app and choose **Open** if Gatekeeper asks for confirmation.
 The app lives in the menu bar after its window closes.
+
+Choose **Quit** from the menu bar to stop it. Quitting, stopping the app from
+Activity Monitor, or an app crash pauses any relay-driven automatic reopening
+until you deliberately open the app again. The pause survives Wi-Fi changes,
+sleep, and relay restarts. A force-quit also stops the app-owned engine; a
+CLI-owned or other shared engine continues under its own owner.
+
+Relay-driven app launch is disabled by default in GitHub downloads. Installing
+the compatibility relay does not enable it. Campus-aware automatic lifecycle
+requires an explicit local `auto_launch: true` setting; its manual-stop behavior
+is described in [Campus-aware relay](docs/CAMPUS_AUTO_ROUTING.md).
 
 Quick Access links open in the macOS default browser. The app does not embed a
 second browser or change the system proxy. When off campus, configure that
@@ -74,7 +85,7 @@ after an app update.
 Extract the CLI archive, then run:
 
 ```bash
-cd hkustgz-connect-cli-1.4.0-macos-arm64
+cd hkustgz-connect-cli-1.4.1-macos-arm64
 ./cli/hkustgzconnect configure YOUR_CAMPUS_USERNAME
 ./cli/hkustgzconnect set-password
 ./cli/hkustgzconnect up
@@ -226,6 +237,7 @@ by Git. Release archives are generated under `dist/`.
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Network coexistence](docs/NETWORK_COEXISTENCE.md)
+- [Campus-aware relay and manual stop](docs/CAMPUS_AUTO_ROUTING.md)
 - [Comparison with EasyConnect](docs/EASYCONNECT_COMPARISON.md)
 - [Traffic and proxying](docs/TRAFFIC_AND_PROXYING.md)
 - [Development and releases](docs/DEVELOPMENT.md)

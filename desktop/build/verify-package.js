@@ -22,6 +22,7 @@ const requiredEntries = [
   '/main.js',
   '/preload.js',
   '/build/trayTemplate.png',
+  '/lib/app-lifecycle.js',
   '/lib/diagnostics.js',
   '/lib/fallback-service.js',
   '/lib/hpc-ssh.js',
